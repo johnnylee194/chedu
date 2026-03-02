@@ -49,7 +49,7 @@ const calculateTotalDistance = (coordinates: Array<[number, number, number?]>): 
 const parseCoordinates = (coordString: string): Array<[number, number, number]> => {
   return coordString.trim().split(/\s+/).map(coord => {
     const parts = coord.split(',').map(Number);
-    return [parts[0], parts[1], parts[2] || 0];
+    return [parts[0] || 0, parts[1] || 0, parts[2] || 0] as [number, number, number];
   }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
 };
 
@@ -264,10 +264,10 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
             if (seg.trkpt) {
               const points = Array.isArray(seg.trkpt) ? seg.trkpt : [seg.trkpt];
               const coordinates: Array<[number, number, number]> = points.map((pt: any) => [
-                parseFloat(pt['@lon']),
-                parseFloat(pt['@lat']),
-                parseFloat(pt.ele || '0')
-              ]);
+                parseFloat(pt['@lon']) || 0,
+                parseFloat(pt['@lat']) || 0,
+                parseFloat(pt.ele || '0') || 0
+              ] as [number, number, number]);
 
               if (coordinates.length > 0) {
                 result.tracks.push({
@@ -314,10 +314,10 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
         if (rte.rtept) {
           const points = Array.isArray(rte.rtept) ? rte.rtept : [rte.rtept];
           const coordinates: Array<[number, number, number]> = points.map((pt: any) => [
-            parseFloat(pt['@lon']),
-            parseFloat(pt['@lat']),
-            parseFloat(pt.ele || '0')
-          ]);
+            parseFloat(pt['@lon']) || 0,
+            parseFloat(pt['@lat']) || 0,
+            parseFloat(pt.ele || '0') || 0
+          ] as [number, number, number]);
 
           if (coordinates.length > 0) {
             result.tracks.push({
