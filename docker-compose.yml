@@ -1,41 +1,20 @@
 services:
-  backend:
+  app:
+    container_name: chedu
     build:
       context: .
-      target: backend-runner
-    container_name: chedu-backend
+      dockerfile: Dockerfile
+    restart: always
     ports:
-      - "3001:3001"
+      - "10080:3000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+      - ./backend/.env:/app/.env
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-in-production}
-      - JWT_EXPIRES_IN=7d
+      - APP_ENV=production
+      - PORT=3000
       - DATABASE_PATH=/app/data/routes.db
       - UPLOAD_DIR=/app/uploads
       - CORS_ORIGIN=*
-    volumes:
-      - backend-data:/app/data
-      - backend-uploads:/app/uploads
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  frontend:
-    build:
-      context: .
-      target: frontend-builder
-    container_name: chedu-frontend
-    ports:
-      - "80:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
-
-volumes:
-  backend-data:
-  backend-uploads:

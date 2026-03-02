@@ -1,42 +1,60 @@
+# --- Stage 1: Build Frontend ---
 FROM node:20-alpine AS frontend-builder
+WORKDIR /app/client
 
-WORKDIR /app/frontend
+# 替换 Alpine 镜像源为腾讯云
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories
 
 COPY frontend/package*.json ./
+# 配置淘宝 NPM 镜像
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm install
 
 COPY frontend/ ./
 RUN npm run build
 
+# --- Stage 2: Build Backend ---
 FROM node:20-alpine AS backend-builder
+WORKDIR /app
 
-WORKDIR /app/backend
+# 替换 Alpine 镜像源为腾讯云
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories
 
 COPY backend/package*.json ./
+
+# 配置淘宝 NPM 镜像
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm install
 
 COPY backend/ ./
 RUN npm run build
 
-FROM node:20-alpine AS backend-runner
+# --- Stage 3: Runtime ---
+FROM node:20-alpine
+WORKDIR /app
 
-WORKDIR /app/backend
+# 替换 Alpine 镜像源为腾讯云
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories
 
-COPY --from=backend-builder /app/backend/node_modules ./node_modules
-COPY --from=backend-builder /app/backend/dist ./dist
-COPY --from=backend-builder /app/backend/package.json ./
+# 复制 package.json
+COPY backend/package*.json ./
 
-RUN npm install --production
+# 配置淘宝 NPM 镜像
+RUN npm config set registry https://registry.npmmirror.com
 
-EXPOSE 3001
+# 安装所有生产依赖
+RUN npm install --only=production
 
-CMD ["node", "dist/server.js"]
+# 复制构建产物
+COPY --from=backend-builder /app/dist ./dist
+COPY --from=frontend-builder /app/client/dist ./client/dist
 
-FROM nginx:alpine
+# 创建数据和上传目录
+RUN mkdir -p data uploads
 
-COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+ENV NODE_ENV=production
+ENV PORT=3000
 
-EXPOSE 80
+EXPOSE 3000
 
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["npm", "start"]

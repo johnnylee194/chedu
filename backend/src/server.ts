@@ -20,7 +20,7 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '../uploads'))));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/routes', routeRoutes);
@@ -29,6 +29,14 @@ app.use('/api/upload', uploadRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Chedu API is running' });
 });
+
+// 静态文件服务（生产环境）
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, '../client/dist')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+  });
+}
 
 const startServer = async () => {
   try {
