@@ -12,9 +12,7 @@ if (!fs.existsSync(dbDir)) {
 let db: Database | null = null;
 
 export const initDatabase = async () => {
-  const SQL = await initSqlJs({
-    locateFile: (file) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
-  });
+  const SQL = await initSqlJs();
 
   if (fs.existsSync(dbPath)) {
     const fileBuffer = fs.readFileSync(dbPath);
