@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mountain, Mail, Lock, User, UserPlus } from 'lucide-react';
+import { Mountain, Mail, Lock, User } from 'lucide-react';
 import { authAPI } from '../lib/api';
 import { useAuthStore } from '../store/auth';
 

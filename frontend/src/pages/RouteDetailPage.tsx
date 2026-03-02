@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, MapPin, Clock, Mountain, Star, Car, Download, Share2 } from 'lucide-react';
+import { ArrowLeft, MapPin, Clock, Mountain, Car, Download, Share2 } from 'lucide-react';
 import { routesAPI } from '../lib/api';
 import { useRouteStore } from '../store/routes';
 import { formatDistance, formatDuration, formatElevation, getDifficultyColor, getDifficultyLabel, getPOIIcon } from '../lib/utils';

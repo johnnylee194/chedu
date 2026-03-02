@@ -32,7 +32,7 @@ const ElevationProfile: React.FC<ElevationProfileProps> = ({ data, maxElevation,
             label={{ value: '海拔 (m)', angle: -90, position: 'insideLeft' }}
           />
           <Tooltip
-            formatter={(value: number, name: string) => [
+            formatter={(value: number) => [
               formatElevation(value),
               '海拔'
             ]}
