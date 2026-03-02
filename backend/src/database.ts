@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
 
@@ -9,12 +9,21 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-const db = new Database(dbPath);
+let db: Database | null = null;
 
-db.pragma('journal_mode = WAL');
+export const initDatabase = async () => {
+  const SQL = await initSqlJs({
+    locateFile: (file) => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+  });
 
-export const initDatabase = () => {
-  db.exec(`
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(fileBuffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
@@ -36,8 +45,7 @@ export const initDatabase = () => {
       vehicle_type TEXT,
       created_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (created_by) REFERENCES users(id)
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS route_tracks (
@@ -46,8 +54,7 @@ export const initDatabase = () => {
       track_data TEXT NOT NULL,
       track_type TEXT DEFAULT 'line',
       difficulty TEXT DEFAULT 'easy',
-      color TEXT DEFAULT '#00FF00',
-      FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+      color TEXT DEFAULT '#00FF00'
     );
 
     CREATE TABLE IF NOT EXISTS pois (
@@ -59,8 +66,7 @@ export const initDatabase = () => {
       latitude REAL NOT NULL,
       longitude REAL NOT NULL,
       elevation REAL,
-      image_url TEXT,
-      FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+      image_url TEXT
     );
 
     CREATE TABLE IF NOT EXISTS route_images (
@@ -68,8 +74,7 @@ export const initDatabase = () => {
       route_id INTEGER NOT NULL,
       image_url TEXT NOT NULL,
       caption TEXT,
-      order_index INTEGER DEFAULT 0,
-      FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+      order_index INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_routes_created_by ON routes(created_by);
@@ -77,6 +82,37 @@ export const initDatabase = () => {
     CREATE INDEX IF NOT EXISTS idx_pois_route_id ON pois(route_id);
     CREATE INDEX IF NOT EXISTS idx_route_images_route_id ON route_images(route_id);
   `);
+
+  saveDatabase();
+};
+
+const saveDatabase = () => {
+  if (!db) return;
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+};
+
+export const query = <T = any>(sql: string, params: any[] = []): T[] => {
+  if (!db) throw new Error('Database not initialized');
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const results: T[] = [];
+  while (stmt.step()) {
+    results.push(stmt.getAsObject() as T);
+  }
+  stmt.free();
+  return results;
+};
+
+export const run = (sql: string, params: any[] = []): { lastInsertRowid: number; changes: number } => {
+  if (!db) throw new Error('Database not initialized');
+  db.run(sql, params);
+  saveDatabase();
+  return {
+    lastInsertRowid: (db as any).exec('SELECT last_insert_rowid() AS id')[0].values[0][0],
+    changes: (db as any).exec('SELECT changes() AS changes')[0].values[0][0]
+  };
 };
 
 export default db;
