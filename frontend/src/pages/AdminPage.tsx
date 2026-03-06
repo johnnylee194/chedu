@@ -60,7 +60,7 @@ const AdminPage: React.FC = () => {
     setUploading(true);
     try {
       const response = await uploadAPI.parseKML(file);
-      const data = response.data;
+      const data = response.data.data;
 
       setFormData({
         ...formData,
@@ -185,10 +185,10 @@ const AdminPage: React.FC = () => {
               <div className="flex items-center space-x-4">
                 <label className="btn-primary cursor-pointer">
                   <Upload className="w-4 h-4 mr-2 inline" />
-                  上传 KML/GPX 文件
+                  上传 KML/GPX/OVKML 文件
                   <input
                     type="file"
-                    accept=".kml,.kmz,.gpx"
+                    accept=".kml,.kmz,.ovkml,.gpx"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
@@ -196,7 +196,7 @@ const AdminPage: React.FC = () => {
                 {uploading && <span className="text-gray-600">解析中...</span>}
               </div>
               <p className="text-sm text-gray-500 mt-2">
-                支持奥维互动地图浏览器导出的 KML、KMZ 或 GPX 格式文件
+                支持奥维互动地图浏览器导出的 KML、KMZ、OVKML 或 GPX 格式文件
               </p>
             </div>
 
