@@ -22,13 +22,13 @@ router.post('/kml', authMiddleware, upload.single('file'), async (req: AuthReque
     const ext = path.extname(req.file.originalname).toLowerCase();
 
     let result;
-    if (ext === '.kml' || ext === '.kmz') {
+    if (ext === '.kml' || ext === '.kmz' || ext === '.ovkml') {
       result = await parseKML(filePath);
     } else if (ext === '.gpx') {
       result = await parseGPX(filePath);
     } else {
       fs.unlinkSync(filePath);
-      return res.status(400).json({ error: 'Unsupported file format. Please upload KML, KMZ, or GPX' });
+      return res.status(400).json({ error: 'Unsupported file format. Please upload KML, KMZ, OVKML, or GPX' });
     }
 
     fs.unlinkSync(filePath);
