@@ -12,3 +12,4 @@ data
 .vscode
 .idea
 package-lock.json
+.trae/

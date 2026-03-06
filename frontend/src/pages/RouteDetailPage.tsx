@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, MapPin, Clock, Mountain, Car, Download, Share2 } from 'lucide-react';
 import { routesAPI } from '../lib/api';
 import { useRouteStore } from '../store/routes';
-import { formatDistance, formatDuration, formatElevation, getDifficultyColor, getDifficultyLabel, getPOIIcon } from '../lib/utils';
+import { formatDistance, formatDuration, formatElevation, getDifficultyColor, getDifficultyLabel, getPOIIcon, haversineDistance } from '../lib/utils';
 import { offlineDB } from '../lib/offline';
 import MapEngine from '../components/MapEngine';
 import ElevationProfile from '../components/ElevationProfile';
@@ -66,14 +66,7 @@ const RouteDetailPage: React.FC = () => {
             const lat2 = coord[1];
             const lon2 = coord[0];
 
-            const R = 6371;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            totalDistance += R * c;
+            totalDistance += haversineDistance(lat1, lon1, lat2, lon2);
           }
 
           data.push({
