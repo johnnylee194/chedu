@@ -55,11 +55,21 @@ const AdminPage: React.FC = () => {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    console.log('[Frontend] File selected:', file);
+    console.log('[Frontend] File name:', file?.name);
+    console.log('[Frontend] File type:', file?.type);
+    console.log('[Frontend] File size:', file?.size);
+
     if (!file) return;
 
     setUploading(true);
     try {
+      console.log('[Frontend] Starting upload...');
       const response = await uploadAPI.parseKML(file);
+      console.log('[Frontend] Full response:', response);
+      console.log('[Frontend] response.data:', response.data);
+      console.log('[Frontend] response.data.data:', response.data.data);
+
       const data = response.data.data;
 
       setFormData({
@@ -73,6 +83,7 @@ const AdminPage: React.FC = () => {
 
       alert('文件解析成功！请完善其他信息后保存。');
     } catch (error) {
+      console.error('[Frontend] Upload error:', error);
       alert('文件解析失败，请检查文件格式');
     } finally {
       setUploading(false);
