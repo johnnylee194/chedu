@@ -54,19 +54,27 @@ const parseCoordinates = (coordString: string): Array<[number, number, number]> 
 };
 
 export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
+  console.log('[Parser] parseKML started, filePath:', filePath);
   let kmlContent = '';
   const ext = path.extname(filePath).toLowerCase();
+  console.log('[Parser] File extension:', ext);
 
   if (ext === '.kmz') {
+    console.log('[Parser] Processing KMZ file...');
     const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
     const kmlFile = zip.file(/\.kml$/i)[0];
     if (kmlFile) {
       kmlContent = await kmlFile.async('text');
+      console.log('[Parser] KMZ extracted, content length:', kmlContent.length);
+    } else {
+      console.error('[Parser] No KML file found in KMZ');
     }
   } else {
     kmlContent = fs.readFileSync(filePath, 'utf-8');
+    console.log('[Parser] KML content read, length:', kmlContent.length);
   }
 
+  console.log('[Parser] Starting XML parsing...');
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@',
@@ -88,9 +96,11 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
   try {
     const xml = parser.parse(kmlContent);
     const kml = xml.kml;
+    console.log('[Parser] XML parsed, kml exists:', !!kml);
 
     if (kml?.Document?.name) {
       result.metadata.name = kml.Document.name;
+      console.log('[Parser] Document name:', kml.Document.name);
     }
 
     if (kml?.Document?.description) {
@@ -156,15 +166,20 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (kml?.Document?.Folder) {
       const folders = Array.isArray(kml.Document.Folder) ? kml.Document.Folder : [kml.Document.Folder];
+      console.log('[Parser] Processing', folders.length, 'folders');
       folders.forEach((folder: any) => processFolder(folder));
     }
 
     if (kml?.Document?.Placemark) {
       const placemarks = Array.isArray(kml.Document.Placemark) ? kml.Document.Placemark : [kml.Document.Placemark];
+      console.log('[Parser] Processing', placemarks.length, 'placemarks at document level');
       placemarks.forEach((pm: any) => processPlacemark(pm));
     }
 
+    console.log('[Parser] Extraction complete - tracks:', result.tracks.length, 'pois:', result.pois.length);
+
     if (result.tracks.length === 0 && result.pois.length === 0) {
+      console.warn('[Parser] No tracks or POIs found, using sample data');
       result.tracks.push({
         track_data: {
           type: 'Feature',
@@ -189,8 +204,10 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
       });
     }
 
-  } catch (error) {
-    console.error('Error parsing KML:', error);
+  } catch (error: any) {
+    console.error('[Parser] Error parsing KML:', error);
+    console.error('[Parser] Error stack:', error?.stack);
+    console.error('[Parser] KML content preview:', kmlContent.substring(0, 500));
     result.tracks.push({
       track_data: {
         type: 'Feature',
@@ -216,13 +233,17 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
   }
 
   result.metadata.total_distance = Math.round(result.metadata.total_distance * 10) / 10;
+  console.log('[Parser] parseKML completed, total_distance:', result.metadata.total_distance);
 
   return result;
 };
 
 export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
+  console.log('[Parser] parseGPX started, filePath:', filePath);
   const gpxContent = fs.readFileSync(filePath, 'utf-8');
+  console.log('[Parser] GPX content read, length:', gpxContent.length);
 
+  console.log('[Parser] Starting XML parsing...');
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@',
@@ -244,9 +265,11 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
   try {
     const xml = parser.parse(gpxContent);
     const gpx = xml.gpx;
+    console.log('[Parser] XML parsed, gpx exists:', !!gpx);
 
     if (gpx?.metadata?.name) {
       result.metadata.name = gpx.metadata.name;
+      console.log('[Parser] GPX name:', gpx.metadata.name);
     }
 
     if (gpx?.metadata?.desc) {
@@ -255,6 +278,7 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (gpx?.trk) {
       const tracks = Array.isArray(gpx.trk) ? gpx.trk : [gpx.trk];
+      console.log('[Parser] Processing', tracks.length, 'tracks');
       
       tracks.forEach((trk: any) => {
         if (trk.trkseg) {
@@ -294,6 +318,7 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (gpx?.wpt) {
       const waypoints = Array.isArray(gpx.wpt) ? gpx.wpt : [gpx.wpt];
+      console.log('[Parser] Processing', waypoints.length, 'waypoints');
       
       waypoints.forEach((wpt: any) => {
         result.pois.push({
@@ -309,6 +334,7 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (gpx?.rte) {
       const routes = Array.isArray(gpx.rte) ? gpx.rte : [gpx.rte];
+      console.log('[Parser] Processing', routes.length, 'routes');
       
       routes.forEach((rte: any) => {
         if (rte.rtept) {
@@ -340,11 +366,16 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
       });
     }
 
-  } catch (error) {
-    console.error('Error parsing GPX:', error);
+    console.log('[Parser] Extraction complete - tracks:', result.tracks.length, 'pois:', result.pois.length);
+
+  } catch (error: any) {
+    console.error('[Parser] Error parsing GPX:', error);
+    console.error('[Parser] Error stack:', error?.stack);
+    console.error('[Parser] GPX content preview:', gpxContent.substring(0, 500));
   }
 
   result.metadata.total_distance = Math.round(result.metadata.total_distance * 10) / 10;
+  console.log('[Parser] parseGPX completed, total_distance:', result.metadata.total_distance);
 
   return result;
 };
