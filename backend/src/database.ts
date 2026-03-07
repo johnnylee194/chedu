@@ -119,8 +119,6 @@ export const run = (sql: string, params: any[] = []): { lastInsertRowid: number;
   
   saveDatabase();
   
-  console.log('[DB] run() result:', { lastInsertRowid, changes, sql: sql.substring(0, 60) + '...' });
-  
   return { lastInsertRowid, changes };
 };
 

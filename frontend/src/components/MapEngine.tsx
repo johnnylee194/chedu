@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -84,19 +84,6 @@ const MapEngine: React.FC<MapEngineProps> = ({
   onMapTypeChange,
 }) => {
   const [currentMapType, setCurrentMapType] = useState(mapType);
-
-  useEffect(() => {
-    console.log('[MapEngine] Props received:', {
-      tracksCount: tracks?.length || 0,
-      poisCount: pois?.length || 0,
-      tracks: tracks.map(t => ({
-        hasTrackData: !!t.track_data,
-        hasGeometry: !!t.track_data?.geometry,
-        coordsCount: t.track_data?.geometry?.coordinates?.length || 0,
-        color: t.color
-      }))
-    });
-  }, [tracks, pois]);
 
   const getTileLayerUrl = () => {
     switch (currentMapType) {
