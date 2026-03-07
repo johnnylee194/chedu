@@ -106,7 +106,6 @@ export const query = <T = any>(sql: string, params: any[] = []): T[] => {
 export const run = (sql: string, params: any[] = []): { lastInsertRowid: number; changes: number } => {
   if (!db) throw new Error('Database not initialized');
   db.run(sql, params);
-  saveDatabase();
   
   const result = db.exec('SELECT last_insert_rowid()');
   const lastInsertRowid = result.length > 0 && result[0].values.length > 0 
@@ -117,6 +116,8 @@ export const run = (sql: string, params: any[] = []): { lastInsertRowid: number;
   const changes = changesResult.length > 0 && changesResult[0].values.length > 0
     ? changesResult[0].values[0][0] as number
     : 0;
+  
+  saveDatabase();
   
   console.log('[DB] run() result:', { lastInsertRowid, changes, sql: sql.substring(0, 60) + '...' });
   
