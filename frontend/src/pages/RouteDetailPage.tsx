@@ -24,6 +24,16 @@ const RouteDetailPage: React.FC = () => {
     setLoading(true);
     try {
       const response = await routesAPI.getById(routeId);
+      console.log('[RouteDetail] Fetched route:', {
+        id: routeId,
+        tracksCount: response.data.tracks?.length || 0,
+        poisCount: response.data.pois?.length || 0,
+        firstTrack: response.data.tracks?.[0] ? {
+          id: response.data.tracks[0].id,
+          route_id: response.data.tracks[0].route_id,
+          coordsCount: response.data.tracks[0].track_data?.geometry?.coordinates?.length
+        } : null
+      });
       setCurrentRoute(response.data);
     } catch (error) {
       setError('Failed to fetch route details');

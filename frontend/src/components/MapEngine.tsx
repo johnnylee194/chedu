@@ -75,6 +75,19 @@ const MapEngine: React.FC<MapEngineProps> = ({
 }) => {
   const [currentMapType, setCurrentMapType] = useState(mapType);
 
+  useEffect(() => {
+    console.log('[MapEngine] Props received:', {
+      tracksCount: tracks?.length || 0,
+      poisCount: pois?.length || 0,
+      tracks: tracks.map(t => ({
+        hasTrackData: !!t.track_data,
+        hasGeometry: !!t.track_data?.geometry,
+        coordsCount: t.track_data?.geometry?.coordinates?.length || 0,
+        color: t.color
+      }))
+    });
+  }, [tracks, pois]);
+
   const getTileLayerUrl = () => {
     switch (currentMapType) {
       case 'satellite':

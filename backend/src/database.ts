@@ -118,6 +118,8 @@ export const run = (sql: string, params: any[] = []): { lastInsertRowid: number;
     ? changesResult[0].values[0][0] as number
     : 0;
   
+  console.log('[DB] run() result:', { lastInsertRowid, changes, sql: sql.substring(0, 60) + '...' });
+  
   return { lastInsertRowid, changes };
 };
 

@@ -34,6 +34,8 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     const pois = query('SELECT * FROM pois WHERE route_id = ?', [routeId]);
     const images = query('SELECT * FROM route_images WHERE route_id = ? ORDER BY order_index', [routeId]);
 
+    console.log('[Route] Fetching route:', { routeId, tracksCount: tracks.length, poisCount: pois.length });
+
     res.json({
       ...route,
       tracks: tracks.map((t: any) => ({ ...t, track_data: JSON.parse(t.track_data) })),
@@ -41,6 +43,7 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
       images
     });
   } catch (error) {
+    console.error('[Route] Error fetching route:', error);
     res.status(500).json({ error: 'Failed to fetch route' });
   }
 });
@@ -61,6 +64,8 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
       images
     } = req.body;
 
+    console.log('[Route] Creating route:', { title, tracksCount: tracks?.length, poisCount: pois?.length });
+
     const result = run(`
       INSERT INTO routes (
         title, description, total_distance, estimated_duration,
@@ -79,10 +84,12 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
     ]);
 
     const routeId = result.lastInsertRowid as number;
+    console.log('[Route] Route inserted:', { routeId, lastInsertRowid: result.lastInsertRowid });
 
     if (tracks && Array.isArray(tracks)) {
-      tracks.forEach((track: any) => {
-        run(`
+      console.log('[Route] Inserting tracks:', tracks.length);
+      tracks.forEach((track: any, index: number) => {
+        const trackResult = run(`
           INSERT INTO route_tracks (route_id, track_data, track_type, difficulty, color)
           VALUES (?, ?, ?, ?, ?)
         `, [
@@ -92,6 +99,7 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
           track.difficulty || 'easy',
           track.color || '#00FF00'
         ]);
+        console.log(`[Route] Track ${index} inserted:`, { routeId, trackResult });
       });
     }
 
@@ -132,6 +140,7 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
       routeId
     });
   } catch (error) {
+    console.error('[Route] Error creating route:', error);
     res.status(500).json({ error: 'Failed to create route' });
   }
 });
