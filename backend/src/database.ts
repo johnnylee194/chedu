@@ -107,10 +107,18 @@ export const run = (sql: string, params: any[] = []): { lastInsertRowid: number;
   if (!db) throw new Error('Database not initialized');
   db.run(sql, params);
   saveDatabase();
-  return {
-    lastInsertRowid: (db as any).exec('SELECT last_insert_rowid() AS id')[0].values[0][0],
-    changes: (db as any).exec('SELECT changes() AS changes')[0].values[0][0]
-  };
+  
+  const result = db.exec('SELECT last_insert_rowid()');
+  const lastInsertRowid = result.length > 0 && result[0].values.length > 0 
+    ? result[0].values[0][0] as number 
+    : 0;
+  
+  const changesResult = db.exec('SELECT changes()');
+  const changes = changesResult.length > 0 && changesResult[0].values.length > 0
+    ? changesResult[0].values[0][0] as number
+    : 0;
+  
+  return { lastInsertRowid, changes };
 };
 
 export default db;
