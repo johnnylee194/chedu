@@ -65,14 +65,9 @@ interface MapEngineProps {
   onMapTypeChange?: (type: 'satellite' | 'terrain' | 'street') => void;
 }
 
-const TIANDITU_KEY = import.meta.env.VITE_TIANDITU_KEY || '';
-
-const TIANDITU_URLS = {
-  vec: `https://t{s}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TIANDITU_KEY}`,
-  cva: `https://t{s}.tianditu.gov.cn/cva_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cva&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TIANDITU_KEY}`,
-  img: `https://t{s}.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TIANDITU_KEY}`,
-  cia: `https://t{s}.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TIANDITU_KEY}`,
-  ter: `https://t{s}.tianditu.gov.cn/ter_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ter&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TIANDITU_KEY}`,
+const AMAP_URLS = {
+  vec: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=2&style=8&x={x}&y={y}&z={z}',
+  img: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
 };
 
 const MapEngine: React.FC<MapEngineProps> = ({
@@ -88,29 +83,21 @@ const MapEngine: React.FC<MapEngineProps> = ({
   const getTileLayerUrl = () => {
     switch (currentMapType) {
       case 'satellite':
-        return TIANDITU_URLS.img;
+        return AMAP_URLS.img;
       case 'terrain':
-        return TIANDITU_URLS.ter;
+        return AMAP_URLS.vec;
       case 'street':
       default:
-        return TIANDITU_URLS.vec;
+        return AMAP_URLS.vec;
     }
   };
 
   const getAnnotationUrl = () => {
-    switch (currentMapType) {
-      case 'satellite':
-        return TIANDITU_URLS.cia;
-      case 'terrain':
-        return null;
-      case 'street':
-      default:
-        return TIANDITU_URLS.cva;
-    }
+    return null;
   };
 
   const getTileAttribution = () => {
-    return '&copy; 天地图';
+    return '&copy; 高德地图';
   };
 
   const handleMapTypeChange = (type: 'satellite' | 'terrain' | 'street') => {
@@ -155,14 +142,14 @@ const MapEngine: React.FC<MapEngineProps> = ({
         <TileLayer
           url={getTileLayerUrl()}
           attribution={getTileAttribution()}
-          subdomains={['0', '1', '2', '3', '4', '5', '6', '7']}
+          subdomains={['1', '2', '3', '4']}
           maxZoom={18}
         />
         
         {getAnnotationUrl() && (
           <TileLayer
             url={getAnnotationUrl()!}
-            subdomains={['0', '1', '2', '3', '4', '5', '6', '7']}
+            subdomains={['1', '2', '3', '4']}
             maxZoom={18}
           />
         )}
