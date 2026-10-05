@@ -152,7 +152,9 @@ export default function App() {
           data: route.geojson
       });
 
-      const buffered = turf.buffer(route.geojson, 1, { units: 'kilometers' });
+      // Simplify geometry before buffering to prevent memory crashes on the frontend
+      const simplified = turf.simplify(route.geojson, { tolerance: 0.0008, highQuality: false });
+      const buffered = turf.buffer(simplified, 1, { units: 'kilometers', steps: 4 });
 
       if (buffered) {
           m.addLayer({

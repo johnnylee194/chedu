@@ -31,35 +31,59 @@ function lat2tiley(lat: number, zoom: number): number {
   );
 }
 
-// Get XYZ tiles that intersect with a GeoJSON polygon
-function getIntersectingTiles(polygon: import("geojson").Feature<import("geojson").Polygon | import("geojson").MultiPolygon>, zoomLevels: number[]): TileInfo[] {
-  const tiles: TileInfo[] = [];
-  const bbox = turf.bbox(polygon);
-  const [minLon, minLat, maxLon, maxLat] = bbox;
+function getTilesForRoute(geojson: any, zoomLevels: number[], bufferKm: number = 1.0): TileInfo[] {
+  const tileSet = new Set<string>();
 
-  for (const z of zoomLevels) {
-    const minX = Math.max(0, lon2tilex(minLon, z));
-    const maxX = Math.min(Math.pow(2, z) - 1, lon2tilex(maxLon, z));
-    const minY = Math.max(0, lat2tiley(maxLat, z)); // Y goes from top to bottom
-    const maxY = Math.min(Math.pow(2, z) - 1, lat2tiley(minLat, z));
+  // Walk along all LineStrings, taking samples every 0.2km
+  turf.segmentEach(geojson, (currentSegment) => {
+    if (!currentSegment || !currentSegment.geometry) return;
+    const line = turf.lineString(currentSegment.geometry.coordinates);
+    const length = turf.length(line, { units: 'kilometers' });
 
-    for (let x = minX; x <= maxX; x++) {
-      for (let y = minY; y <= maxY; y++) {
-        // Here we could add a stricter intersection check by converting the tile back to a polygon
-        // and checking turf.booleanIntersects(polygon, tilePolygon) if needed for exactness.
-        // For now, bounding box intersection on tiles is usually a good enough overestimation.
-        tiles.push({ z, x, y });
+    // Always include start and end points
+    const samples: number[][] = [line.geometry.coordinates[0]];
+    const step = 0.2;
+    for (let d = step; d < length; d += step) {
+      const pt = turf.along(line, d, { units: 'kilometers' });
+      samples.push(pt.geometry.coordinates);
+    }
+    samples.push(line.geometry.coordinates[line.geometry.coordinates.length - 1]);
+
+    for (const [lng, lat] of samples) {
+      const deltaLat = bufferKm / 111.32;
+      const deltaLng = bufferKm / (111.32 * Math.cos(lat * Math.PI / 180));
+
+      const minLon = lng - deltaLng;
+      const maxLon = lng + deltaLng;
+      const minLat = lat - deltaLat;
+      const maxLat = lat + deltaLat;
+
+      for (const z of zoomLevels) {
+        const minX = Math.max(0, lon2tilex(minLon, z));
+        const maxX = Math.min(Math.pow(2, z) - 1, lon2tilex(maxLon, z));
+        const minY = Math.max(0, lat2tiley(maxLat, z));
+        const maxY = Math.min(Math.pow(2, z) - 1, lat2tiley(minLat, z));
+
+        for (let x = minX; x <= maxX; x++) {
+          for (let y = minY; y <= maxY; y++) {
+            tileSet.add(`${z}/${x}/${y}`);
+          }
+        }
       }
     }
-  }
+  });
 
+  const tiles: TileInfo[] = [];
+  for (const key of tileSet) {
+    const [z, x, y] = key.split('/').map(Number);
+    tiles.push({ z, x, y });
+  }
   return tiles;
 }
 
 export function estimateTilesForRoute(geojsonStr: string): TileEstimation {
   const geojson = JSON.parse(geojsonStr);
-  const buffered = turf.buffer(geojson, 1, { units: 'kilometers' });
-  const tiles = getIntersectingTiles(buffered as import("geojson").Feature<import("geojson").Polygon | import("geojson").MultiPolygon>, [11, 12, 13, 14, 15, 16]);
+  const tiles = getTilesForRoute(geojson, [11, 12, 13, 14, 15, 16], 1.0);
 
   const breakdown: Record<number, number> = {};
   for (const t of tiles) {
@@ -82,8 +106,7 @@ export async function buildMBTiles(
   sourceUrlTemplate: string = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 ) {
   const geojson = JSON.parse(geojsonStr);
-  const buffered = turf.buffer(geojson, 1, { units: 'kilometers' });
-  const tiles = getIntersectingTiles(buffered as import("geojson").Feature<import("geojson").Polygon | import("geojson").MultiPolygon>, [11, 12, 13, 14, 15, 16]);
+  const tiles = getTilesForRoute(geojson, [11, 12, 13, 14, 15, 16], 1.0);
 
   const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
   if (!fs.existsSync(mbtilesDir)) {
