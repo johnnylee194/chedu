@@ -20,6 +20,9 @@ WORKDIR /app
 # 替换 Alpine 镜像源为腾讯云
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories
 
+# Install build tools for better-sqlite3 native compilation
+RUN apk add --no-cache python3 make g++
+
 COPY backend/package*.json ./
 
 # 配置淘宝 NPM 镜像
@@ -35,6 +38,9 @@ WORKDIR /app
 
 # 替换 Alpine 镜像源为腾讯云
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.cloud.tencent.com/g' /etc/apk/repositories
+
+# Install build tools for better-sqlite3 native bindings in production
+RUN apk add --no-cache python3 make g++
 
 # 复制 package.json
 COPY backend/package*.json ./
