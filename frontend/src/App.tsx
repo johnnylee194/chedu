@@ -29,25 +29,25 @@ export default function App() {
         style: {
           version: 8,
           sources: {
-            'online-osm': {
+            'online-esri': {
               type: 'raster',
-              tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+              tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
               tileSize: 256,
-              attribution: '&copy; OpenStreetMap contributors'
+              attribution: '&copy; Esri'
             }
           },
           layers: [
             {
               id: 'online-basemap',
               type: 'raster',
-              source: 'online-osm',
+              source: 'online-esri',
               minzoom: 0,
-              maxzoom: 19
+              maxzoom: 18
             }
           ]
         },
-        center: [0, 0],
-        zoom: 2
+        center: [104.195397, 35.86166], // China center
+        zoom: 4
       });
     }
 
@@ -180,7 +180,7 @@ export default function App() {
       });
 
       const bbox = turf.bbox(route.geojson) as [number, number, number, number];
-      m.fitBounds(bbox, { padding: 50 });
+      m.fitBounds(bbox, { padding: 50, duration: 800 });
 
       updateTilesLayer(route.id, useOfflineTiles);
   };

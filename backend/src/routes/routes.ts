@@ -15,7 +15,17 @@ router.get('/', (req: Request, res: Response) => {
       ORDER BY created_at DESC
     `);
 
-    res.json(routes);
+    // Safely parse geojson
+    const parsedRoutes = routes.map((r: any) => {
+       if (r.geojson && typeof r.geojson === 'string') {
+          try {
+              r.geojson = JSON.parse(r.geojson);
+          } catch(e) {}
+       }
+       return r;
+    });
+
+    res.json(parsedRoutes);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch routes' });
   }
@@ -36,8 +46,10 @@ router.get('/:id', (req: Request, res: Response) => {
     const pois = query('SELECT * FROM pois WHERE route_id = ?', [routeId]);
     const images = query('SELECT * FROM route_images WHERE route_id = ? ORDER BY order_index', [routeId]);
 
-    if (route.geojson) {
-       route.geojson = JSON.parse(route.geojson);
+    if (route.geojson && typeof route.geojson === 'string') {
+       try {
+           route.geojson = JSON.parse(route.geojson);
+       } catch(e) {}
     }
 
     res.json({

@@ -9,7 +9,10 @@ const uploadDir = process.env.UPLOAD_DIR || 'uploads/';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-const upload = multer({ dest: uploadDir });
+const upload = multer({
+    dest: uploadDir,
+    limits: { fileSize: 100 * 1024 * 1024 }
+});
 
 router.post('/kml', upload.single('file'), async (req: Request, res: Response) => {
   try {

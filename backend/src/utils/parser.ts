@@ -77,13 +77,25 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
   });
 
   const features: import("geojson").Feature[] = [];
-  const metadata = { name: 'Unnamed Route', description: '', total_distance: 0, total_ascent: 0, total_descent: 0, bbox: null as any };
+  const originalFileName = path.basename(filePath, path.extname(filePath));
+  // attempt utf8 decode just in case
+  let decodedName = originalFileName;
+  try {
+     decodedName = decodeURIComponent(escape(originalFileName));
+  } catch (e) {}
+
+  const metadata = { name: decodedName || 'Unnamed Route', description: '', total_distance: 0, total_ascent: 0, total_descent: 0, bbox: null as any };
 
   try {
     const xml = parser.parse(kmlContent);
     const kml = xml.kml;
 
-    if (kml?.Document?.name) metadata.name = kml.Document.name;
+    // Look for name anywhere near the top
+    const docName = kml?.Document?.name || kml?.Folder?.name || kml?.Placemark?.name;
+    if (docName && typeof docName === 'string') {
+        metadata.name = docName;
+    }
+
     if (kml?.Document?.description) metadata.description = kml.Document.description;
 
     const processPlacemark = (placemark: any, color: string = '#00FF00') => {
