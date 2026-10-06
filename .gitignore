@@ -11,5 +11,4 @@ data
 *.db-wal
 .vscode
 .idea
-package-lock.json
 .trae/
