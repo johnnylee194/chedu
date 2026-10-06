@@ -1,8 +1,7 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { AuthRequest, authMiddleware } from '../middleware/auth';
 import { parseKML, parseGPX } from '../utils/parser';
 
 const router = Router();
@@ -10,9 +9,12 @@ const uploadDir = process.env.UPLOAD_DIR || 'uploads/';
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
-const upload = multer({ dest: uploadDir });
+const upload = multer({
+    dest: uploadDir,
+    limits: { fileSize: 100 * 1024 * 1024 }
+});
 
-router.post('/kml', authMiddleware, upload.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/kml', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       console.error('[Upload] No file uploaded');
@@ -43,8 +45,7 @@ router.post('/kml', authMiddleware, upload.single('file'), async (req: AuthReque
     }
 
     console.log('[Upload] Parse result:', {
-      tracks: result.tracks.length,
-      pois: result.pois.length,
+      features: result.geojson.features.length,
       total_distance: result.metadata.total_distance
     });
 

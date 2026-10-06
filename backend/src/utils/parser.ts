@@ -2,49 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
+import * as turf from '@turf/turf';
 
 export interface ParsedRouteData {
-  tracks: Array<{
-    track_data: any;
-    track_type: string;
-    difficulty: string;
-    color: string;
-  }>;
-  pois: Array<{
-    name: string;
-    type: string;
-    description: string;
-    latitude: number;
-    longitude: number;
-    elevation: number;
-  }>;
+  geojson: import("geojson").FeatureCollection;
   metadata: {
     name: string;
     description: string;
-    total_distance: number;
+    total_distance: number; // km
+    total_ascent: number; // m
+    total_descent: number; // m
+    bbox: [number, number, number, number] | null;
   };
 }
-
-const haversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-};
-
-const calculateTotalDistance = (coordinates: Array<[number, number, number?]>): number => {
-  let totalDistance = 0;
-  for (let i = 1; i < coordinates.length; i++) {
-    const [lon1, lat1] = coordinates[i - 1];
-    const [lon2, lat2] = coordinates[i];
-    totalDistance += haversineDistance(lat1, lon1, lat2, lon2);
-  }
-  return totalDistance;
-};
 
 const parseCoordinates = (coordString: string): Array<[number, number, number]> => {
   return coordString.trim().split(/\s+/).map(coord => {
@@ -53,28 +23,51 @@ const parseCoordinates = (coordString: string): Array<[number, number, number]> 
   }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
 };
 
-export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
-  console.log('[Parser] parseKML started, filePath:', filePath);
-  let kmlContent = '';
-  const ext = path.extname(filePath).toLowerCase();
-  console.log('[Parser] File extension:', ext);
+const calculateMetrics = (features: import("geojson").Feature<any>[]) => {
+  let totalDistance = 0;
+  let totalAscent = 0;
+  let totalDescent = 0;
 
-  if (ext === '.kmz') {
-    console.log('[Parser] Processing KMZ file...');
-    const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
-    const kmlFile = zip.file(/\.kml$/i)[0];
-    if (kmlFile) {
-      kmlContent = await kmlFile.async('text');
-      console.log('[Parser] KMZ extracted, content length:', kmlContent.length);
-    } else {
-      console.error('[Parser] No KML file found in KMZ');
+  for (const feature of features) {
+    if (feature.geometry.type === 'LineString') {
+      const coords = feature.geometry.coordinates;
+      for (let i = 1; i < coords.length; i++) {
+        const p1 = coords[i - 1];
+        const p2 = coords[i];
+
+        // Calculate distance
+        totalDistance += turf.distance(turf.point(p1), turf.point(p2), { units: 'kilometers' });
+
+        // Calculate elevation change
+        if (p1.length > 2 && p2.length > 2) {
+          const eleDiff = p2[2] - p1[2];
+          if (eleDiff > 0) {
+            totalAscent += eleDiff;
+          } else {
+            totalDescent += Math.abs(eleDiff);
+          }
+        }
+      }
     }
-  } else {
-    kmlContent = fs.readFileSync(filePath, 'utf-8');
-    console.log('[Parser] KML content read, length:', kmlContent.length);
   }
 
-  console.log('[Parser] Starting XML parsing...');
+  return { totalDistance, totalAscent, totalDescent };
+};
+
+export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
+  let kmlContent = '';
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === '.kmz' || ext === '.ovkml') {
+    const data = fs.readFileSync(filePath);
+    const zip = await JSZip.loadAsync(data);
+    const kmlFile = Object.keys(zip.files).find(name => name.toLowerCase().endsWith('.kml'));
+    if (!kmlFile) throw new Error('No KML file found in KMZ/OVKML archive');
+    kmlContent = await zip.files[kmlFile].async('string');
+  } else {
+    kmlContent = fs.readFileSync(filePath, 'utf-8');
+  }
+
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@',
@@ -83,42 +76,37 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
     parseAttributeValue: false,
   });
 
-  const result: ParsedRouteData = {
-    tracks: [],
-    pois: [],
-    metadata: {
-      name: '未命名路线',
-      description: '',
-      total_distance: 0
-    }
-  };
+  const features: import("geojson").Feature[] = [];
+  const originalFileName = path.basename(filePath, path.extname(filePath));
+  // attempt utf8 decode just in case
+  let decodedName = originalFileName;
+  try {
+     decodedName = decodeURIComponent(escape(originalFileName));
+  } catch (e) {}
+
+  const metadata = { name: decodedName || 'Unnamed Route', description: '', total_distance: 0, total_ascent: 0, total_descent: 0, bbox: null as any };
 
   try {
     const xml = parser.parse(kmlContent);
     const kml = xml.kml;
-    console.log('[Parser] XML parsed, kml exists:', !!kml);
 
-    if (kml?.Document?.name) {
-      result.metadata.name = kml.Document.name;
-      console.log('[Parser] Document name:', kml.Document.name);
+    // Look for name anywhere near the top
+    const docName = kml?.Document?.name || kml?.Folder?.name || kml?.Placemark?.name;
+    if (docName && typeof docName === 'string') {
+        metadata.name = docName;
     }
 
-    if (kml?.Document?.description) {
-      result.metadata.description = kml.Document.description;
-    }
+    if (kml?.Document?.description) metadata.description = kml.Document.description;
 
     const processPlacemark = (placemark: any, color: string = '#00FF00') => {
       if (placemark.Point) {
         const coords = parseCoordinates(placemark.Point.coordinates || '');
         if (coords.length > 0) {
-          result.pois.push({
-            name: placemark.name || '未命名航点',
-            type: 'waypoint',
+          features.push(turf.point(coords[0], {
+            name: placemark.name || 'Unnamed Waypoint',
             description: placemark.description || '',
-            latitude: coords[0][1],
-            longitude: coords[0][0],
-            elevation: coords[0][2] || 0
-          });
+            type: 'waypoint'
+          }));
         }
       }
 
@@ -129,22 +117,11 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
 
         lineStrings.forEach((ls: any) => {
           const coords = parseCoordinates(ls.coordinates || '');
-          if (coords.length > 0) {
-            result.tracks.push({
-              track_data: {
-                type: 'Feature',
-                properties: { name: placemark.name || '未命名轨迹' },
-                geometry: {
-                  type: 'LineString',
-                  coordinates: coords
-                }
-              },
-              track_type: 'line',
-              difficulty: 'easy',
+          if (coords.length > 1) {
+            features.push(turf.lineString(coords, {
+              name: placemark.name || 'Unnamed Track',
               color: color
-            });
-
-            result.metadata.total_distance += calculateTotalDistance(coords);
+            }));
           }
         });
       }
@@ -166,84 +143,34 @@ export const parseKML = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (kml?.Document?.Folder) {
       const folders = Array.isArray(kml.Document.Folder) ? kml.Document.Folder : [kml.Document.Folder];
-      console.log('[Parser] Processing', folders.length, 'folders');
       folders.forEach((folder: any) => processFolder(folder));
     }
 
     if (kml?.Document?.Placemark) {
       const placemarks = Array.isArray(kml.Document.Placemark) ? kml.Document.Placemark : [kml.Document.Placemark];
-      console.log('[Parser] Processing', placemarks.length, 'placemarks at document level');
       placemarks.forEach((pm: any) => processPlacemark(pm));
     }
-
-    console.log('[Parser] Extraction complete - tracks:', result.tracks.length, 'pois:', result.pois.length);
-
-    if (result.tracks.length === 0 && result.pois.length === 0) {
-      console.warn('[Parser] No tracks or POIs found, using sample data');
-      result.tracks.push({
-        track_data: {
-          type: 'Feature',
-          properties: { name: '示例轨迹' },
-          geometry: {
-            type: 'LineString',
-            coordinates: [[116.4074, 39.9042, 50], [116.4174, 39.9142, 80], [116.4274, 39.9042, 60]]
-          }
-        },
-        track_type: 'line',
-        difficulty: 'easy',
-        color: '#00FF00'
-      });
-
-      result.pois.push({
-        name: '示例营地',
-        type: 'camping',
-        description: '一个美丽的露营地',
-        latitude: 39.9042,
-        longitude: 116.4074,
-        elevation: 50
-      });
-    }
-
-  } catch (error: any) {
-    console.error('[Parser] Error parsing KML:', error);
-    console.error('[Parser] Error stack:', error?.stack);
-    console.error('[Parser] KML content preview:', kmlContent.substring(0, 500));
-    result.tracks.push({
-      track_data: {
-        type: 'Feature',
-        properties: { name: '示例轨迹' },
-        geometry: {
-          type: 'LineString',
-          coordinates: [[116.4074, 39.9042, 50], [116.4174, 39.9142, 80], [116.4274, 39.9042, 60]]
-        }
-      },
-      track_type: 'line',
-      difficulty: 'easy',
-      color: '#00FF00'
-    });
-
-    result.pois.push({
-      name: '示例营地',
-      type: 'camping',
-      description: '一个美丽的露营地',
-      latitude: 39.9042,
-      longitude: 116.4074,
-      elevation: 50
-    });
+  } catch (error) {
+    console.error('Error parsing KML', error);
   }
 
-  result.metadata.total_distance = Math.round(result.metadata.total_distance * 10) / 10;
-  console.log('[Parser] parseKML completed, total_distance:', result.metadata.total_distance);
+  const featureCollection = turf.featureCollection(features);
+  const metrics = calculateMetrics(features);
 
-  return result;
+  metadata.total_distance = Math.round(metrics.totalDistance * 10) / 10;
+  metadata.total_ascent = Math.round(metrics.totalAscent);
+  metadata.total_descent = Math.round(metrics.totalDescent);
+
+  if (features.length > 0) {
+     metadata.bbox = turf.bbox(featureCollection) as [number, number, number, number];
+  }
+
+  return { geojson: featureCollection, metadata };
 };
 
 export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
-  console.log('[Parser] parseGPX started, filePath:', filePath);
   const gpxContent = fs.readFileSync(filePath, 'utf-8');
-  console.log('[Parser] GPX content read, length:', gpxContent.length);
 
-  console.log('[Parser] Starting XML parsing...');
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@',
@@ -252,33 +179,18 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
     parseAttributeValue: false,
   });
 
-  const result: ParsedRouteData = {
-    tracks: [],
-    pois: [],
-    metadata: {
-      name: '未命名路线',
-      description: '',
-      total_distance: 0
-    }
-  };
+  const features: import("geojson").Feature[] = [];
+  const metadata = { name: 'Unnamed Route', description: '', total_distance: 0, total_ascent: 0, total_descent: 0, bbox: null as any };
 
   try {
     const xml = parser.parse(gpxContent);
     const gpx = xml.gpx;
-    console.log('[Parser] XML parsed, gpx exists:', !!gpx);
 
-    if (gpx?.metadata?.name) {
-      result.metadata.name = gpx.metadata.name;
-      console.log('[Parser] GPX name:', gpx.metadata.name);
-    }
-
-    if (gpx?.metadata?.desc) {
-      result.metadata.description = gpx.metadata.desc;
-    }
+    if (gpx?.metadata?.name) metadata.name = gpx.metadata.name;
+    if (gpx?.metadata?.desc) metadata.description = gpx.metadata.desc;
 
     if (gpx?.trk) {
       const tracks = Array.isArray(gpx.trk) ? gpx.trk : [gpx.trk];
-      console.log('[Parser] Processing', tracks.length, 'tracks');
       
       tracks.forEach((trk: any) => {
         if (trk.trkseg) {
@@ -293,22 +205,11 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
                 parseFloat(pt.ele || '0') || 0
               ] as [number, number, number]);
 
-              if (coordinates.length > 0) {
-                result.tracks.push({
-                  track_data: {
-                    type: 'Feature',
-                    properties: { name: trk.name || '未命名轨迹' },
-                    geometry: {
-                      type: 'LineString',
-                      coordinates: coordinates
-                    }
-                  },
-                  track_type: 'line',
-                  difficulty: 'easy',
-                  color: '#00FF00'
-                });
-
-                result.metadata.total_distance += calculateTotalDistance(coordinates);
+              if (coordinates.length > 1) {
+                features.push(turf.lineString(coordinates, {
+                   name: trk.name || 'Unnamed Track',
+                   color: '#00FF00'
+                }));
               }
             }
           });
@@ -318,23 +219,22 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
 
     if (gpx?.wpt) {
       const waypoints = Array.isArray(gpx.wpt) ? gpx.wpt : [gpx.wpt];
-      console.log('[Parser] Processing', waypoints.length, 'waypoints');
       
       waypoints.forEach((wpt: any) => {
-        result.pois.push({
-          name: wpt.name || '未命名航点',
-          type: wpt.type || 'waypoint',
-          description: wpt.desc || '',
-          latitude: parseFloat(wpt['@lat']),
-          longitude: parseFloat(wpt['@lon']),
-          elevation: parseFloat(wpt.ele || '0')
-        });
+        features.push(turf.point([
+            parseFloat(wpt['@lon']) || 0,
+            parseFloat(wpt['@lat']) || 0,
+            parseFloat(wpt.ele || '0') || 0
+        ], {
+            name: wpt.name || 'Unnamed Waypoint',
+            description: wpt.desc || '',
+            type: wpt.type || 'waypoint'
+        }));
       });
     }
 
     if (gpx?.rte) {
       const routes = Array.isArray(gpx.rte) ? gpx.rte : [gpx.rte];
-      console.log('[Parser] Processing', routes.length, 'routes');
       
       routes.forEach((rte: any) => {
         if (rte.rtept) {
@@ -345,37 +245,29 @@ export const parseGPX = async (filePath: string): Promise<ParsedRouteData> => {
             parseFloat(pt.ele || '0') || 0
           ] as [number, number, number]);
 
-          if (coordinates.length > 0) {
-            result.tracks.push({
-              track_data: {
-                type: 'Feature',
-                properties: { name: rte.name || '未命名路线' },
-                geometry: {
-                  type: 'LineString',
-                  coordinates: coordinates
-                }
-              },
-              track_type: 'line',
-              difficulty: 'easy',
-              color: '#00FF00'
-            });
-
-            result.metadata.total_distance += calculateTotalDistance(coordinates);
+          if (coordinates.length > 1) {
+             features.push(turf.lineString(coordinates, {
+                name: rte.name || 'Unnamed Route',
+                color: '#00FF00'
+             }));
           }
         }
       });
     }
-
-    console.log('[Parser] Extraction complete - tracks:', result.tracks.length, 'pois:', result.pois.length);
-
-  } catch (error: any) {
-    console.error('[Parser] Error parsing GPX:', error);
-    console.error('[Parser] Error stack:', error?.stack);
-    console.error('[Parser] GPX content preview:', gpxContent.substring(0, 500));
+  } catch (error) {
+    console.error('Error parsing GPX:', error);
   }
 
-  result.metadata.total_distance = Math.round(result.metadata.total_distance * 10) / 10;
-  console.log('[Parser] parseGPX completed, total_distance:', result.metadata.total_distance);
+  const featureCollection = turf.featureCollection(features);
+  const metrics = calculateMetrics(features);
 
-  return result;
+  metadata.total_distance = Math.round(metrics.totalDistance * 10) / 10;
+  metadata.total_ascent = Math.round(metrics.totalAscent);
+  metadata.total_descent = Math.round(metrics.totalDescent);
+
+  if (features.length > 0) {
+      metadata.bbox = turf.bbox(featureCollection) as [number, number, number, number];
+  }
+
+  return { geojson: featureCollection, metadata };
 };

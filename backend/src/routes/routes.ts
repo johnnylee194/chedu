@@ -1,25 +1,37 @@
-import { Router, Response } from 'express';
-import { AuthRequest, authMiddleware } from '../middleware/auth';
-import { query, run } from '../database';
+import { Router, Request, Response } from 'express';
+import { query, run, queryOne } from '../database';
+import { estimateTilesForRoute, buildMBTiles, getJobStatus } from '../services/mbtilesBuilder';
+import path from 'path';
+import fs from 'fs';
+import Database from 'better-sqlite3';
 
 const router = Router();
 
-router.get('/', (req: AuthRequest, res: Response) => {
+router.get('/', (req: Request, res: Response) => {
   try {
     const routes = query(`
-      SELECT r.*, u.username as created_by_name
-      FROM routes r
-      LEFT JOIN users u ON r.created_by = u.id
-      ORDER BY r.created_at DESC
+      SELECT *
+      FROM routes
+      ORDER BY created_at DESC
     `);
 
-    res.json(routes);
+    // Safely parse geojson
+    const parsedRoutes = routes.map((r: any) => {
+       if (r.geojson && typeof r.geojson === 'string') {
+          try {
+              r.geojson = JSON.parse(r.geojson);
+          } catch(e) {}
+       }
+       return r;
+    });
+
+    res.json(parsedRoutes);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch routes' });
   }
 });
 
-router.get('/:id', (req: AuthRequest, res: Response) => {
+router.get('/:id', (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
 
@@ -34,6 +46,12 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     const pois = query('SELECT * FROM pois WHERE route_id = ?', [routeId]);
     const images = query('SELECT * FROM route_images WHERE route_id = ? ORDER BY order_index', [routeId]);
 
+    if (route.geojson && typeof route.geojson === 'string') {
+       try {
+           route.geojson = JSON.parse(route.geojson);
+       } catch(e) {}
+    }
+
     res.json({
       ...route,
       tracks: tracks.map((t: any) => ({ ...t, track_data: JSON.parse(t.track_data) })),
@@ -45,7 +63,7 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
   }
 });
 
-router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
+router.post('/', (req: Request, res: Response) => {
   try {
     const {
       title,
@@ -56,62 +74,30 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
       max_elevation,
       difficulty,
       vehicle_type,
-      tracks,
-      pois,
+      geojson,
       images
     } = req.body;
+
+    const geojsonStr = geojson ? JSON.stringify(geojson) : null;
 
     const result = run(`
       INSERT INTO routes (
         title, description, total_distance, estimated_duration,
-        total_ascent, max_elevation, difficulty, vehicle_type, created_by
+        total_ascent, max_elevation, difficulty, vehicle_type, geojson
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       title,
       description,
       total_distance,
-      estimated_duration,
-      total_ascent,
-      max_elevation,
-      difficulty,
-      vehicle_type,
-      req.userId
+      estimated_duration ?? null,
+      total_ascent ?? null,
+      max_elevation ?? null,
+      difficulty ?? null,
+      vehicle_type ?? null,
+      geojsonStr
     ]);
 
     const routeId = result.lastInsertRowid as number;
-
-    if (tracks && Array.isArray(tracks)) {
-      tracks.forEach((track: any) => {
-        run(`
-          INSERT INTO route_tracks (route_id, track_data, track_type, difficulty, color)
-          VALUES (?, ?, ?, ?, ?)
-        `, [
-          routeId,
-          JSON.stringify(track.track_data),
-          track.track_type || 'line',
-          track.difficulty || 'easy',
-          track.color || '#00FF00'
-        ]);
-      });
-    }
-
-    if (pois && Array.isArray(pois)) {
-      pois.forEach((poi: any) => {
-        run(`
-          INSERT INTO pois (route_id, name, type, description, latitude, longitude, elevation, image_url)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `, [
-          routeId,
-          poi.name,
-          poi.type,
-          poi.description,
-          poi.latitude,
-          poi.longitude,
-          poi.elevation,
-          poi.image_url
-        ]);
-      });
-    }
 
     if (images && Array.isArray(images)) {
       images.forEach((image: any, index: number) => {
@@ -136,7 +122,7 @@ router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
   }
 });
 
-router.put('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+router.put('/:id', (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
     const {
@@ -174,7 +160,7 @@ router.put('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
   }
 });
 
-router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+router.delete('/:id', (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
 
@@ -184,6 +170,106 @@ router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete route' });
   }
+});
+
+router.get('/:id/estimate-tiles', (req: Request, res: Response) => {
+  try {
+    const routeId = req.params.id;
+    const route = queryOne('SELECT geojson FROM routes WHERE id = ?', [routeId]);
+    if (!route || !route.geojson) {
+       return res.status(404).json({ error: 'Route or geojson not found' });
+    }
+
+    const estimation = estimateTilesForRoute(route.geojson);
+    res.json(estimation);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to estimate tiles' });
+  }
+});
+
+router.post('/:id/build-mbtiles', (req: Request, res: Response) => {
+    try {
+        const routeId = parseInt(req.params.id);
+        const route = queryOne('SELECT geojson FROM routes WHERE id = ?', [routeId]);
+        if (!route || !route.geojson) {
+           return res.status(404).json({ error: 'Route or geojson not found' });
+        }
+
+        const sourceUrl = req.body.sourceUrl;
+
+        // Kick off background job
+        buildMBTiles(routeId, route.geojson, sourceUrl).catch(console.error);
+
+        res.json({ message: 'Build job started' });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to start build job' });
+    }
+});
+
+router.get('/:id/tile-status', (req: Request, res: Response) => {
+    try {
+        const routeId = req.params.id;
+
+        // check memory first for live updates
+        const activeJob = getJobStatus(routeId);
+        if (activeJob) {
+             return res.json(activeJob);
+        }
+
+        const route = queryOne('SELECT tile_status as status, total_tiles as total, downloaded_tiles as downloaded, file_size_mb as fileSizeMB, error_message as errorMessage FROM routes WHERE id = ?', [routeId]);
+        if (!route) {
+            return res.status(404).json({ error: 'Route not found' });
+        }
+
+        res.json(route);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to get job status' });
+    }
+});
+
+router.get('/:id/mbtiles', (req: Request, res: Response) => {
+    try {
+        const routeId = req.params.id;
+        const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
+        const dbPath = path.join(mbtilesDir, `route_${routeId}.mbtiles`);
+
+        if (!fs.existsSync(dbPath)) {
+             return res.status(404).json({ error: 'MBTiles file not found' });
+        }
+
+        res.download(dbPath, `route_${routeId}.mbtiles`);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to download mbtiles file' });
+    }
+});
+
+router.get('/:id/tiles/:z/:x/:y', (req: Request, res: Response) => {
+    try {
+        const { id, z, x, y } = req.params;
+        const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
+        const dbPath = path.join(mbtilesDir, `route_${id}.mbtiles`);
+
+        if (!fs.existsSync(dbPath)) {
+             return res.status(404).json({ error: 'MBTiles file not found' });
+        }
+
+        const db = new Database(dbPath, { readonly: true });
+
+        // MBTiles standard uses TMS where y is reversed from standard slippy map XYZ
+        const tmsY = Math.pow(2, parseInt(z)) - 1 - parseInt(y);
+
+        const tile = db.prepare('SELECT tile_data FROM tiles WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?').get(z, x, tmsY) as any;
+        db.close();
+
+        if (!tile || !tile.tile_data) {
+             return res.status(404).send('Tile not found');
+        }
+
+        res.set('Content-Type', 'image/jpeg');
+        res.send(tile.tile_data);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to stream tile' });
+    }
 });
 
 export default router;
