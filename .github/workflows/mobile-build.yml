@@ -39,6 +39,9 @@ jobs:
       - name: Expo Prebuild
         run: npx expo prebuild --platform android --clean
 
+      - name: Patch Gradle Wrapper
+        run: sed -i 's/gradle-[0-9\.]*-all\.zip/gradle-8.13-all.zip/g' android/gradle/wrapper/gradle-wrapper.properties
+
       - name: Build Android Release
         run: |
           cd android
@@ -85,13 +88,13 @@ jobs:
       - name: Build iOS Release
         run: |
           cd ios
-          xcodebuild -workspace chedu.xcworkspace -scheme chedu -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO -derivedDataPath build
+          xcodebuild -workspace Chedu.xcworkspace -scheme Chedu -configuration Release -sdk iphoneos CODE_SIGNING_ALLOWED=NO -derivedDataPath build
 
       - name: Package IPA
         run: |
           cd ios/build/Build/Products/Release-iphoneos
           mkdir Payload
-          mv chedu.app Payload/
+          mv Chedu.app Payload/
           zip -r ../../../../../app-unsigned.ipa Payload
 
       - name: Upload Artifact
