@@ -28,7 +28,7 @@ jobs:
           cache-dependency-path: './mobile/package-lock.json'
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -38,6 +38,9 @@ jobs:
 
       - name: Expo Prebuild
         run: npx expo prebuild --platform android --clean
+
+      - name: Remove Disable New Architecture from gradle.properties
+        run: sed -i '/newArchEnabled=false/d' android/gradle.properties
 
       - name: Patch Gradle Wrapper
         run: sed -i 's/gradle-[0-9\.]*-all\.zip/gradle-8.13-all.zip/g' android/gradle/wrapper/gradle-wrapper.properties
