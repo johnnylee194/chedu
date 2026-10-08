@@ -1,10 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView } from 'react-native';
-import MapboxGL from '@maplibre/maplibre-react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView } from 'react-native';
+import * as MapLibreGLNamespace from '@maplibre/maplibre-react-native';
 import { syncRoutes, getCachedRoutes, RouteDetail, getServerUrl, saveServerUrl } from '../services/syncService';
 
+const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
+const MapView = MapLibreGL.MapView ?? (MapLibreGLNamespace as any).MapView;
+const Camera = MapLibreGL.Camera ?? (MapLibreGLNamespace as any).Camera;
+const ShapeSource = MapLibreGL.ShapeSource ?? (MapLibreGLNamespace as any).ShapeSource;
+const LineLayer = MapLibreGL.LineLayer ?? (MapLibreGLNamespace as any).LineLayer;
+
 try {
-  MapboxGL.setAccessToken(null);
+  if (MapLibreGL.setAccessToken) {
+    MapLibreGL.setAccessToken(null);
+  } else if ((MapLibreGLNamespace as any).setAccessToken) {
+    (MapLibreGLNamespace as any).setAccessToken(null);
+  }
 } catch (e) {
   console.error('Failed to set MapLibre access token:', e);
 }
@@ -103,17 +113,17 @@ export default function MapScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.mapContainer}>
-        <MapboxGL.MapView
+        <MapView
           style={styles.map}
           mapStyle={mapStyle}
           logoEnabled={false}
           attributionEnabled={false}
         >
-          <MapboxGL.Camera ref={cameraRef} zoomLevel={10} />
+          <Camera ref={cameraRef} zoomLevel={10} />
 
           {selectedRoute?.geojson && (
-            <MapboxGL.ShapeSource id="routeSource" shape={selectedRoute.geojson}>
-              <MapboxGL.LineLayer
+            <ShapeSource id="routeSource" shape={selectedRoute.geojson}>
+              <LineLayer
                 id="routeLayer"
                 style={{
                   lineColor: '#FF5722',
@@ -122,13 +132,16 @@ export default function MapScreen() {
                   lineCap: 'round',
                 }}
               />
-            </MapboxGL.ShapeSource>
+            </ShapeSource>
           )}
-        </MapboxGL.MapView>
+        </MapView>
 
-        <TouchableOpacity style={styles.settingsButton} onPress={() => setSettingsVisible(true)}>
+        <Pressable
+          style={({ pressed }) => [styles.settingsButton, pressed && { opacity: 0.7 }]}
+          onPress={() => setSettingsVisible(true)}
+        >
           <Text style={styles.settingsButtonText}>⚙️ Settings</Text>
-        </TouchableOpacity>
+        </Pressable>
       </View>
 
       {/* Bottom Drawer UI */}
@@ -137,9 +150,13 @@ export default function MapScreen() {
           <Text style={styles.drawerTitle}>Routes</Text>
           <View style={styles.syncContainer}>
             <Text style={styles.syncStatus}>{syncStatus}</Text>
-            <TouchableOpacity style={styles.syncButton} onPress={handleSync} disabled={loading}>
+            <Pressable
+              style={({ pressed }) => [styles.syncButton, pressed && { opacity: 0.7 }]}
+              onPress={handleSync}
+              disabled={loading}
+            >
               {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.syncButtonText}>Sync</Text>}
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
 
@@ -147,15 +164,19 @@ export default function MapScreen() {
           data={routes}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.routeItem, selectedRoute?.id === item.id && styles.selectedRouteItem]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.routeItem,
+                selectedRoute?.id === item.id && styles.selectedRouteItem,
+                pressed && { opacity: 0.7 }
+              ]}
               onPress={() => handleRouteSelect(item)}
             >
               <Text style={styles.routeName}>{item.name}</Text>
               <Text style={styles.routeDetails}>
                 {(item.distance / 1000).toFixed(2)} km • MBTiles: {item.mbtiles_ready ? 'Ready' : 'Pending'}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           )}
           ListEmptyComponent={<Text style={styles.emptyText}>No routes found.</Text>}
         />
@@ -175,12 +196,18 @@ export default function MapScreen() {
               keyboardType="url"
             />
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={() => setSettingsVisible(false)}>
+              <Pressable
+                style={({ pressed }) => [styles.modalButton, styles.cancelButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setSettingsVisible(false)}
+              >
                 <Text style={styles.buttonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButton} onPress={saveSettings}>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.modalButton, pressed && { opacity: 0.7 }]}
+                onPress={saveSettings}
+              >
                 <Text style={styles.buttonText}>Save</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
           </View>
         </View>

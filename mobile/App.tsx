@@ -1,6 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, ScrollView, TouchableOpacity, SafeAreaView } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable, SafeAreaView } from 'react-native';
 import MapScreen from './src/screens/MapScreen';
 
 interface ErrorBoundaryProps {
@@ -39,12 +39,18 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
           <ScrollView contentContainerStyle={styles.scrollContainer}>
             <Text style={styles.errorTitle}>Something went wrong!</Text>
             <Text style={styles.errorMessage}>{this.state.error?.toString()}</Text>
+            {this.state.error?.stack && (
+              <Text style={styles.errorStack}>{this.state.error.stack}</Text>
+            )}
             {this.state.errorInfo?.componentStack && (
               <Text style={styles.errorStack}>{this.state.errorInfo.componentStack}</Text>
             )}
-            <TouchableOpacity style={styles.retryButton} onPress={this.handleRetry}>
+            <Pressable
+              style={({ pressed }) => [styles.retryButton, pressed && { opacity: 0.7 }]}
+              onPress={this.handleRetry}
+            >
               <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
+            </Pressable>
           </ScrollView>
         </SafeAreaView>
       );
