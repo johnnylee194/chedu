@@ -8,7 +8,10 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cn.januslab.chedu"
+      "bundleIdentifier": "cn.januslab.chedu",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "This app requires access to your location to show your position on the map and provide off-road navigation."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +21,10 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "cn.januslab.chedu"
+      "package": "cn.januslab.chedu",
+      "permissions": [
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
