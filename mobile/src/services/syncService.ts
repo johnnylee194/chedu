@@ -122,8 +122,11 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
 
         const routeDetail: RouteDetail = {
           ...route,
-          name: detailData.name || route.name,
-          distance_km: detailData.distance_km || route.distance_km,
+          name: detailData.name ?? route.name,
+          distance: detailData.distance ?? route.distance,
+          distance_km: detailData.distance_km ?? route.distance_km,
+          mbtiles_ready: detailData.mbtiles_ready ?? route.mbtiles_ready,
+          created_at: detailData.created_at ?? route.created_at,
           geojson: parsedGeojson,
           bbox,
         };
