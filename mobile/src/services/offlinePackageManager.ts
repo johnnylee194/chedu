@@ -1,17 +1,21 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Directory, Paths } from 'expo-file-system';
 
-const MBTILES_DIR = `${FileSystem.documentDirectory}mbtiles/`;
+const getMBTilesDir = (): Directory => {
+  return new Directory(Paths.document, 'mbtiles');
+};
 
 // Ensure directory exists
 export const initOfflineManager = async () => {
-  const dirInfo = await FileSystem.getInfoAsync(MBTILES_DIR);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(MBTILES_DIR, { intermediates: true });
+  const dir = getMBTilesDir();
+  if (!dir.exists) {
+    dir.create();
   }
 };
 
 export const getMBTilesPath = (routeId: number): string => {
-  return `${MBTILES_DIR}route_${routeId}.mbtiles`;
+  const dir = getMBTilesDir();
+  const file = new File(dir, `route_${routeId}.mbtiles`);
+  return file.uri;
 };
 
 // Converts the local file URI to the native mbtiles:// protocol format
@@ -22,9 +26,9 @@ export const getMBTilesUri = (routeId: number): string => {
 
 export const isMBTilesDownloaded = async (routeId: number): Promise<boolean> => {
   try {
-    const path = getMBTilesPath(routeId);
-    const info = await FileSystem.getInfoAsync(path);
-    return info.exists;
+    const dir = getMBTilesDir();
+    const file = new File(dir, `route_${routeId}.mbtiles`);
+    return file.exists;
   } catch (error) {
     console.error('Error checking MBTiles status', error);
     return false;
@@ -39,45 +43,61 @@ export const downloadMBTiles = async (
   await initOfflineManager();
 
   const downloadUrl = `${serverUrl}/api/routes/${routeId}/mbtiles`;
-  const fileUri = getMBTilesPath(routeId);
+  const file = new File(getMBTilesDir(), `route_${routeId}.mbtiles`);
 
   try {
-    const downloadResumable = FileSystem.createDownloadResumable(
-      downloadUrl,
-      fileUri,
-      {},
-      (downloadProgress) => {
-        const progress =
-          downloadProgress.totalBytesExpectedToWrite !== -1 // Ensure we know total bytes
-            ? downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite
-            : 0; // if unknown, can't calc percentage
-        onProgress(Math.max(0, Math.min(progress, 1))); // clamp 0-1
-      }
-    );
-
-    const result = await downloadResumable.downloadAsync();
-
-    // Check if result exists and status is 200 (OK)
-    if (result && result.status === 200) {
-      return true;
-    } else {
-       // Cleanup failed download
-       await deleteMBTiles(routeId);
-       return false;
+    const response = await fetch(downloadUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
+    const contentLength = response.headers.get('content-length');
+    const totalBytes = contentLength ? parseInt(contentLength, 10) : -1;
+    let receivedBytes = 0;
+
+    if (response.body) {
+      const reader = response.body.getReader();
+      const writer = file.writableStream().getWriter();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        if (value) {
+          await writer.write(value);
+          receivedBytes += value.length;
+          if (totalBytes !== -1) {
+             onProgress(Math.max(0, Math.min(receivedBytes / totalBytes, 1)));
+          }
+        }
+      }
+
+      await writer.close();
+
+      if (totalBytes === -1) {
+         onProgress(1);
+      }
+    } else {
+      const blob = await response.blob();
+      const buffer = await blob.arrayBuffer();
+      file.write(new Uint8Array(buffer));
+      onProgress(1);
+    }
+
+    return true;
   } catch (error) {
     console.error(`Error downloading MBTiles for route ${routeId}`, error);
+    await deleteMBTiles(routeId);
     return false;
   }
 };
 
 export const deleteMBTiles = async (routeId: number): Promise<boolean> => {
   try {
-    const path = getMBTilesPath(routeId);
-    const info = await FileSystem.getInfoAsync(path);
-    if (info.exists) {
-      await FileSystem.deleteAsync(path);
+    const dir = getMBTilesDir();
+    const file = new File(dir, `route_${routeId}.mbtiles`);
+    if (file.exists) {
+      file.delete();
     }
     return true;
   } catch (error) {

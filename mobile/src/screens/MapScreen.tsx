@@ -187,6 +187,8 @@ export default function MapScreen() {
         >
           <Camera ref={cameraRef} zoomLevel={10} />
 
+          <MapLibreGL.Images images={{ 'arrow-up': require('../../assets/icon.png') }} />
+
           {/* Offline MBTiles Raster Layer */}
           {offlineMapMode && selectedRoute && downloadedRoutes.has(selectedRoute.id) && (
             <MapLibreGL.RasterSource
@@ -367,9 +369,9 @@ export default function MapScreen() {
                 onPress={() => handleRouteSelect(item)}
               >
                 <View style={styles.routeInfo}>
-                  <Text style={styles.routeName}>{item.name}</Text>
+                  <Text style={styles.routeName}>{item.name || 'Unnamed Route'}</Text>
                   <Text style={styles.routeDetails}>
-                    {(item.distance / 1000).toFixed(2)} km
+                    {item.distance_km ? Number(item.distance_km).toFixed(1) + ' km' : (item.distance ? (item.distance / 1000).toFixed(2) + ' km' : '0.0 km')}
                   </Text>
                   {selectedRoute?.id === item.id && isDownloaded && (
                      <Pressable

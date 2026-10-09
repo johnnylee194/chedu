@@ -1,11 +1,12 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { File, Directory, Paths } from 'expo-file-system';
 
 const DEFAULT_SERVER_URL = 'https://chedu.januslab.cn';
 
 export interface RouteInfo {
   id: number;
   name: string;
-  distance: number;
+  distance?: number;
+  distance_km?: number;
   mbtiles_ready: number;
   created_at: string;
 }
@@ -18,10 +19,9 @@ export interface RouteDetail extends RouteInfo {
 // 1. Settings Management
 export const getServerUrl = async (): Promise<string> => {
   try {
-    const SETTINGS_PATH = `${FileSystem.documentDirectory}settings.json`;
-    const fileInfo = await FileSystem.getInfoAsync(SETTINGS_PATH);
-    if (fileInfo.exists) {
-      const content = await FileSystem.readAsStringAsync(SETTINGS_PATH);
+    const file = new File(Paths.document, 'settings.json');
+    if (file.exists) {
+      const content = file.textSync();
       const settings = JSON.parse(content);
       return settings.serverUrl || DEFAULT_SERVER_URL;
     }
@@ -33,9 +33,9 @@ export const getServerUrl = async (): Promise<string> => {
 
 export const saveServerUrl = async (url: string): Promise<void> => {
   try {
-    const SETTINGS_PATH = `${FileSystem.documentDirectory}settings.json`;
+    const file = new File(Paths.document, 'settings.json');
     const settings = { serverUrl: url };
-    await FileSystem.writeAsStringAsync(SETTINGS_PATH, JSON.stringify(settings));
+    file.write(JSON.stringify(settings));
   } catch (error) {
     console.error('Error saving settings:', error);
   }
@@ -97,7 +97,7 @@ const parseGeojson = (rawGeojson: any): any => {
 export const syncRoutes = async (): Promise<RouteDetail[]> => {
   const serverUrl = await getServerUrl();
   const routesUrl = `${serverUrl}/api/routes`;
-  const ROUTES_DIR = `${FileSystem.documentDirectory}routes/`;
+  const routesDir = new Directory(Paths.document, 'routes');
 
   try {
     const listResponse = await fetchWithTimeout(routesUrl);
@@ -105,9 +105,8 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
     const routesList: RouteInfo[] = await listResponse.json();
 
     // Ensure route directory exists
-    const dirInfo = await FileSystem.getInfoAsync(ROUTES_DIR);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(ROUTES_DIR, { intermediates: true });
+    if (!routesDir.exists) {
+      routesDir.create();
     }
 
     const fullRoutes: RouteDetail[] = [];
@@ -119,10 +118,12 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
         const detailData = await detailResponse.json();
 
         const parsedGeojson = parseGeojson(detailData.geojson);
-        const bbox = computeBBox(parsedGeojson);
+        const bbox = detailData.bbox || computeBBox(parsedGeojson);
 
         const routeDetail: RouteDetail = {
           ...route,
+          name: detailData.name || route.name,
+          distance_km: detailData.distance_km || route.distance_km,
           geojson: parsedGeojson,
           bbox,
         };
@@ -130,8 +131,8 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
         fullRoutes.push(routeDetail);
 
         // Save to local cache
-        const cachePath = `${ROUTES_DIR}${route.id}.json`;
-        await FileSystem.writeAsStringAsync(cachePath, JSON.stringify(routeDetail));
+        const cacheFile = new File(routesDir, `${route.id}.json`);
+        cacheFile.write(JSON.stringify(routeDetail));
       }
     }
 
@@ -145,23 +146,22 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
 // 4. Local Cache Logic
 export const getCachedRoutes = async (): Promise<RouteDetail[]> => {
   try {
-    const ROUTES_DIR = `${FileSystem.documentDirectory}routes/`;
-    const dirInfo = await FileSystem.getInfoAsync(ROUTES_DIR);
-    if (!dirInfo.exists) {
+    const routesDir = new Directory(Paths.document, 'routes');
+    if (!routesDir.exists) {
       return [];
     }
 
-    const files = await FileSystem.readDirectoryAsync(ROUTES_DIR);
+    const files = routesDir.list();
     const cachedRoutes: RouteDetail[] = [];
 
     for (const file of files) {
-      if (file.endsWith('.json')) {
-        const content = await FileSystem.readAsStringAsync(`${ROUTES_DIR}${file}`);
+      if (file.name.endsWith('.json') && file instanceof File) {
+        const content = file.textSync();
         try {
           const route: RouteDetail = JSON.parse(content);
           cachedRoutes.push(route);
         } catch (e) {
-          console.error(`Failed to parse cached route ${file}`, e);
+          console.error(`Failed to parse cached route ${file.name}`, e);
         }
       }
     }
