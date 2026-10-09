@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "ignoreDeprecations": "5.0",
+    "moduleResolution": "bundler"
+  }
+}
