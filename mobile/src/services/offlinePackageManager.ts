@@ -1,3 +1,5 @@
+// @ts-ignore
+import { createDownloadResumable } from 'expo-file-system/legacy';
 import { File, Directory, Paths } from 'expo-file-system';
 
 const getMBTilesDir = (): Directory => {
@@ -41,50 +43,27 @@ export const downloadMBTiles = async (
   onProgress: (progress: number) => void
 ): Promise<boolean> => {
   await initOfflineManager();
-
   const downloadUrl = `${serverUrl}/api/routes/${routeId}/mbtiles`;
   const file = new File(getMBTilesDir(), `route_${routeId}.mbtiles`);
 
   try {
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const contentLength = response.headers.get('content-length');
-    const totalBytes = contentLength ? parseInt(contentLength, 10) : -1;
-    let receivedBytes = 0;
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      const writer = file.writableStream().getWriter();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        if (value) {
-          await writer.write(value);
-          receivedBytes += value.length;
-          if (totalBytes !== -1) {
-             onProgress(Math.max(0, Math.min(receivedBytes / totalBytes, 1)));
-          }
-        }
+    const downloadResumable = createDownloadResumable(
+      downloadUrl,
+      file.uri,
+      {},
+      (downloadProgress: any) => {
+        const progress = downloadProgress.totalBytesWritten / downloadProgress.totalBytesExpectedToWrite;
+        onProgress(Math.max(0, Math.min(progress, 1))); // safely clamp
       }
+    );
 
-      await writer.close();
-
-      if (totalBytes === -1) {
-         onProgress(1);
-      }
-    } else {
-      const blob = await response.blob();
-      const buffer = await blob.arrayBuffer();
-      file.write(new Uint8Array(buffer));
+    const result = await downloadResumable.downloadAsync();
+    if (result && result.status === 200) {
       onProgress(1);
+      return true;
+    } else {
+      throw new Error(`Download failed with status ${result?.status}`);
     }
-
-    return true;
   } catch (error) {
     console.error(`Error downloading MBTiles for route ${routeId}`, error);
     await deleteMBTiles(routeId);
