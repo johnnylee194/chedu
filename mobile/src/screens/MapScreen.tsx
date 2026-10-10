@@ -185,7 +185,7 @@ export default function MapScreen() {
           logoEnabled={false}
           attributionEnabled={false}
         >
-          <Camera ref={cameraRef} defaultSettings={{ zoomLevel: 10 }} />
+          <Camera ref={cameraRef} />
 
           <MapLibreGL.Images images={{ 'arrow-up': require('../../assets/icon.png') }} />
 
@@ -288,35 +288,6 @@ export default function MapScreen() {
         >
           <Text style={styles.settingsButtonText}>⚙️ Settings</Text>
         </Pressable>
-
-        {/* Quick Controls */}
-        <View style={styles.quickControls}>
-          <Pressable
-             style={({ pressed }) => [styles.controlButton, pressed && { opacity: 0.7 }]}
-             onPress={() => {
-               if (coords && cameraRef.current) {
-                 cameraRef.current.setCamera({
-                   centerCoordinate: [coords.longitude, coords.latitude],
-                   zoomLevel: 14,
-                   animationDuration: 1000,
-                 });
-               }
-             }}
-          >
-            <Text style={styles.controlButtonText}>🎯 Center</Text>
-          </Pressable>
-          <Pressable
-             style={({ pressed }) => [styles.controlButton, pressed && { opacity: 0.7 }]}
-             onPress={() => {
-               if (selectedRoute && selectedRoute.bbox && cameraRef.current) {
-                 const [minLng, minLat, maxLng, maxLat] = selectedRoute.bbox;
-                 cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], 50, 1000);
-               }
-             }}
-          >
-            <Text style={styles.controlButtonText}>🗺 Fit</Text>
-          </Pressable>
-        </View>
 
         {/* Off-Road Driving HUD */}
         <View style={styles.hudContainer}>
@@ -566,27 +537,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#007AFF',
     fontWeight: '600',
-  },
-  quickControls: {
-    position: 'absolute',
-    right: 10,
-    top: '40%',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    borderRadius: 8,
-    padding: 5,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  controlButton: {
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  controlButtonText: {
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   hudContainer: {
     position: 'absolute',
