@@ -44,6 +44,8 @@ const mapStyle = JSON.stringify({
   ],
 });
 
+const MAP_IMAGES = { 'arrow-up': require('../../assets/icon.png') };
+
 export default function MapScreen() {
   const [routes, setRoutes] = useState<RouteDetail[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<RouteDetail | null>(null);
@@ -187,7 +189,7 @@ export default function MapScreen() {
         >
           <Camera ref={cameraRef} />
 
-          <MapLibreGL.Images images={{ 'arrow-up': require('../../assets/icon.png') }} />
+          <MapLibreGL.Images images={MAP_IMAGES} />
 
           {/* Offline MBTiles Raster Layer */}
           {offlineMapMode && selectedRoute && downloadedRoutes.has(selectedRoute.id) && (
