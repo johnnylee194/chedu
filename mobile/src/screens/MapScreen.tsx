@@ -89,7 +89,7 @@ export default function MapScreen() {
     const checkDownloadedRoutes = async () => {
       const downloaded = new Set<number>();
       for (const route of routes) {
-        if (Number(route.mbtiles_ready) === 1) {
+        if (route.tile_status === 'completed') {
           const isDownloaded = await isMBTilesDownloaded(route.id);
           if (isDownloaded) {
             downloaded.add(route.id);
@@ -185,7 +185,7 @@ export default function MapScreen() {
           logoEnabled={false}
           attributionEnabled={false}
         >
-          <Camera ref={cameraRef} zoomLevel={10} />
+          <Camera ref={cameraRef} defaultSettings={{ zoomLevel: 10 }} />
 
           <MapLibreGL.Images images={{ 'arrow-up': require('../../assets/icon.png') }} />
 
@@ -369,9 +369,9 @@ export default function MapScreen() {
                 onPress={() => handleRouteSelect(item)}
               >
                 <View style={styles.routeInfo}>
-                  <Text style={styles.routeName}>{item.name || 'Unnamed Route'}</Text>
+                  <Text style={styles.routeName}>{item.title || 'Unnamed Route'}</Text>
                   <Text style={styles.routeDetails}>
-                    {item.distance_km !== undefined && item.distance_km !== null ? Number(item.distance_km).toFixed(1) + ' km' : (item.distance !== undefined && item.distance !== null ? (item.distance / 1000).toFixed(2) + ' km' : '0.0 km')}
+                    {item.total_distance !== undefined && item.total_distance !== null ? Number(item.total_distance).toFixed(1) + ' km' : '0.0 km'}
                   </Text>
                   {selectedRoute?.id === item.id && isDownloaded && (
                      <Pressable
@@ -385,7 +385,7 @@ export default function MapScreen() {
                   )}
                 </View>
 
-                {Number(item.mbtiles_ready) === 1 && (
+                {item.tile_status === 'completed' && (
                   <View style={styles.downloadSection}>
                     {isDownloaded ? (
                       <Pressable

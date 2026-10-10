@@ -4,10 +4,9 @@ const DEFAULT_SERVER_URL = 'https://chedu.januslab.cn';
 
 export interface RouteInfo {
   id: number;
-  name: string;
-  distance?: number;
-  distance_km?: number;
-  mbtiles_ready: number;
+  title: string;
+  total_distance: number;
+  tile_status: string;
   created_at: string;
 }
 
@@ -122,10 +121,9 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
 
         const routeDetail: RouteDetail = {
           ...route,
-          name: detailData.name ?? route.name,
-          distance: detailData.distance ?? route.distance,
-          distance_km: detailData.distance_km ?? route.distance_km,
-          mbtiles_ready: detailData.mbtiles_ready ?? route.mbtiles_ready,
+          title: detailData.title ?? route.title,
+          total_distance: detailData.total_distance ?? route.total_distance,
+          tile_status: detailData.tile_status ?? route.tile_status,
           created_at: detailData.created_at ?? route.created_at,
           geojson: parsedGeojson,
           bbox,
