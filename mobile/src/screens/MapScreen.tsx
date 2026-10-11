@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView } from 'react-native';
 import * as MapLibreGLNamespace from '@maplibre/maplibre-react-native';
 import { syncRoutes, getCachedRoutes, RouteDetail, getServerUrl, saveServerUrl } from '../services/syncService';
+import { useLocationService } from '../services/locationService';
+import { isMBTilesDownloaded, downloadMBTiles, deleteMBTiles, getMBTilesUri } from '../services/offlinePackageManager';
 
 const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
 const MapView = MapLibreGL.MapView ?? (MapLibreGLNamespace as any).MapView;
@@ -42,6 +44,8 @@ const mapStyle = JSON.stringify({
   ],
 });
 
+const MAP_IMAGES = { 'arrow-up': require('../../assets/icon.png') };
+
 export default function MapScreen() {
   const [routes, setRoutes] = useState<RouteDetail[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<RouteDetail | null>(null);
@@ -49,6 +53,15 @@ export default function MapScreen() {
   const [syncStatus, setSyncStatus] = useState<string>('');
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [serverUrlInput, setServerUrlInput] = useState('');
+
+  // Offline Map States
+  const [offlineMapMode, setOfflineMapMode] = useState(false);
+  const [downloadedRoutes, setDownloadedRoutes] = useState<Set<number>>(new Set());
+  const [downloadingRoutes, setDownloadingRoutes] = useState<Record<number, number>>({}); // routeId -> progress (0-1)
+
+  // Location States
+  const locationService = useLocationService();
+  const { coords, heading } = locationService;
 
   const cameraRef = useRef<any>(null);
 
@@ -72,6 +85,26 @@ export default function MapScreen() {
 
     init();
   }, []);
+
+  // Update downloaded routes status when routes change
+  useEffect(() => {
+    const checkDownloadedRoutes = async () => {
+      const downloaded = new Set<number>();
+      for (const route of routes) {
+        if (route.tile_status === 'completed') {
+          const isDownloaded = await isMBTilesDownloaded(route.id);
+          if (isDownloaded) {
+            downloaded.add(route.id);
+          }
+        }
+      }
+      setDownloadedRoutes(downloaded);
+    };
+
+    if (routes.length > 0) {
+      checkDownloadedRoutes();
+    }
+  }, [routes]);
 
   const handleSync = async () => {
     if (loading) return;
@@ -110,6 +143,41 @@ export default function MapScreen() {
     handleSync();
   };
 
+  const handleDownload = async (routeId: number) => {
+    if (downloadingRoutes[routeId] !== undefined) return;
+
+    setDownloadingRoutes(prev => ({ ...prev, [routeId]: 0 }));
+    const serverUrl = await getServerUrl();
+
+    const success = await downloadMBTiles(serverUrl, routeId, (progress) => {
+      setDownloadingRoutes(prev => ({ ...prev, [routeId]: progress }));
+    });
+
+    setDownloadingRoutes(prev => {
+      const next = { ...prev };
+      delete next[routeId];
+      return next;
+    });
+
+    if (success) {
+      setDownloadedRoutes(prev => new Set(prev).add(routeId));
+    }
+  };
+
+  const handleDelete = async (routeId: number) => {
+    const success = await deleteMBTiles(routeId);
+    if (success) {
+      setDownloadedRoutes(prev => {
+        const next = new Set(prev);
+        next.delete(routeId);
+        return next;
+      });
+      if (selectedRoute?.id === routeId && offlineMapMode) {
+        setOfflineMapMode(false);
+      }
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.mapContainer}>
@@ -119,8 +187,27 @@ export default function MapScreen() {
           logoEnabled={false}
           attributionEnabled={false}
         >
-          <Camera ref={cameraRef} zoomLevel={10} />
+          <Camera ref={cameraRef} />
 
+          <MapLibreGL.Images images={MAP_IMAGES} />
+
+          {/* Offline MBTiles Raster Layer */}
+          {offlineMapMode && selectedRoute && downloadedRoutes.has(selectedRoute.id) && (
+            <MapLibreGL.RasterSource
+              id="offline-mbtiles"
+              tileUrlTemplates={[getMBTilesUri(selectedRoute.id)]}
+              tileSize={256}
+              minZoomLevel={11}
+              maxZoomLevel={18}
+            >
+              <MapLibreGL.RasterLayer
+                id="offline-mbtiles-layer"
+                style={{ rasterOpacity: 1 }}
+              />
+            </MapLibreGL.RasterSource>
+          )}
+
+          {/* Route Polyline */}
           {selectedRoute?.geojson && (
             <ShapeSource id="routeSource" shape={selectedRoute.geojson}>
               <LineLayer
@@ -134,6 +221,67 @@ export default function MapScreen() {
               />
             </ShapeSource>
           )}
+
+          {/* Real-time Vehicle Marker */}
+          {coords && (
+            <ShapeSource
+              id="userLocationSource"
+              shape={{
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: {
+                      type: 'Point',
+                      coordinates: [coords.longitude, coords.latitude],
+                    },
+                    properties: {},
+                  },
+                ],
+              }}
+            >
+              {/* Accuracy Circle */}
+              {coords.accuracy && (
+                <MapLibreGL.CircleLayer
+                  id="userLocationAccuracyLayer"
+                  style={{
+                    circleRadius: coords.accuracy,
+                    circleRadiusTransition: { duration: 0 },
+                    circleColor: '#007AFF',
+                    circleOpacity: 0.2,
+                    circlePitchAlignment: 'map',
+                  }}
+                />
+              )}
+              {/* Blue Dot */}
+              <MapLibreGL.CircleLayer
+                id="userLocationDotLayer"
+                style={{
+                  circleRadius: 8,
+                  circleColor: '#007AFF',
+                  circleStrokeColor: '#FFFFFF',
+                  circleStrokeWidth: 3,
+                  circlePitchAlignment: 'map',
+                }}
+              />
+              {/* Heading Indicator (Cone/Arrow) */}
+              {heading !== null && (
+                 <MapLibreGL.SymbolLayer
+                   id="userLocationHeadingLayer"
+                   style={{
+                     iconImage: 'arrow-up', // Assuming default icon or can use a custom loaded image
+                     iconSize: 0.5,
+                     iconRotate: heading,
+                     iconRotationAlignment: 'map',
+                     iconPitchAlignment: 'map',
+                     iconOffset: [0, -15],
+                     iconAllowOverlap: true,
+                     iconIgnorePlacement: true,
+                   }}
+                 />
+              )}
+            </ShapeSource>
+          )}
         </MapView>
 
         <Pressable
@@ -142,6 +290,22 @@ export default function MapScreen() {
         >
           <Text style={styles.settingsButtonText}>⚙️ Settings</Text>
         </Pressable>
+
+        {/* Off-Road Driving HUD */}
+        <View style={styles.hudContainer}>
+           <Text style={styles.hudText}>
+              Loc: {coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : '--'}
+           </Text>
+           <Text style={styles.hudText}>
+              Alt: {coords?.altitude !== null && coords?.altitude !== undefined ? `${coords.altitude.toFixed(0)}m` : '--'}
+           </Text>
+           <Text style={styles.hudText}>
+              Spd: {coords?.speed !== null && coords?.speed !== undefined ? `${(coords.speed * 3.6).toFixed(1)} km/h` : '--'}
+           </Text>
+           <Text style={styles.hudText}>
+              Acc: {coords?.accuracy !== null && coords?.accuracy !== undefined ? `±${coords.accuracy.toFixed(0)}m` : '--'}
+           </Text>
+        </View>
       </View>
 
       {/* Bottom Drawer UI */}
@@ -163,21 +327,62 @@ export default function MapScreen() {
         <FlatList
           data={routes}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <Pressable
-              style={({ pressed }) => [
-                styles.routeItem,
-                selectedRoute?.id === item.id && styles.selectedRouteItem,
-                pressed && { opacity: 0.7 }
-              ]}
-              onPress={() => handleRouteSelect(item)}
-            >
-              <Text style={styles.routeName}>{item.name}</Text>
-              <Text style={styles.routeDetails}>
-                {(item.distance / 1000).toFixed(2)} km • MBTiles: {item.mbtiles_ready ? 'Ready' : 'Pending'}
-              </Text>
-            </Pressable>
-          )}
+          renderItem={({ item }) => {
+            const isDownloaded = downloadedRoutes.has(item.id);
+            const isDownloading = downloadingRoutes[item.id] !== undefined;
+            const progress = downloadingRoutes[item.id] || 0;
+
+            return (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.routeItem,
+                  selectedRoute?.id === item.id && styles.selectedRouteItem,
+                  pressed && { opacity: 0.7 }
+                ]}
+                onPress={() => handleRouteSelect(item)}
+              >
+                <View style={styles.routeInfo}>
+                  <Text style={styles.routeName}>{item.title || 'Unnamed Route'}</Text>
+                  <Text style={styles.routeDetails}>
+                    {item.total_distance !== undefined && item.total_distance !== null ? Number(item.total_distance).toFixed(1) + ' km' : '0.0 km'}
+                  </Text>
+                  {selectedRoute?.id === item.id && isDownloaded && (
+                     <Pressable
+                       style={styles.offlineToggle}
+                       onPress={() => setOfflineMapMode(!offlineMapMode)}
+                     >
+                       <Text style={styles.offlineToggleText}>
+                         {offlineMapMode ? '✅ Offline Map Active' : '🔄 Switch to Offline Map'}
+                       </Text>
+                     </Pressable>
+                  )}
+                </View>
+
+                {item.tile_status === 'completed' && (
+                  <View style={styles.downloadSection}>
+                    {isDownloaded ? (
+                      <Pressable
+                        style={[styles.downloadButton, styles.deleteButton]}
+                        onPress={() => handleDelete(item.id)}
+                      >
+                        <Text style={styles.downloadButtonText}>Delete</Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable
+                        style={[styles.downloadButton, isDownloading && styles.downloadingButton]}
+                        onPress={() => handleDownload(item.id)}
+                        disabled={isDownloading}
+                      >
+                        <Text style={styles.downloadButtonText}>
+                          {isDownloading ? `${(progress * 100).toFixed(0)}%` : 'Download'}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+              </Pressable>
+            );
+          }}
           ListEmptyComponent={<Text style={styles.emptyText}>No routes found.</Text>}
         />
       </View>
@@ -293,6 +498,66 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: '#eee',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  routeInfo: {
+    flex: 1,
+  },
+  downloadSection: {
+    marginLeft: 10,
+    justifyContent: 'center',
+  },
+  downloadButton: {
+    backgroundColor: '#34C759',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  downloadingButton: {
+    backgroundColor: '#FF9500',
+  },
+  deleteButton: {
+    backgroundColor: '#FF3B30',
+  },
+  downloadButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  offlineToggle: {
+    marginTop: 8,
+    padding: 6,
+    backgroundColor: '#e6f2ff',
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  offlineToggleText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  hudContainer: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    right: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+  },
+  hudText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
+    marginRight: 8,
   },
   selectedRouteItem: {
     borderColor: '#007AFF',
