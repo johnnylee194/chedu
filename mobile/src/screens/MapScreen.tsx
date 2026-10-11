@@ -207,7 +207,7 @@ export default function MapScreen() {
               tileUrlTemplates={[getMBTilesUri(selectedRoute.id)]}
               tileSize={256}
               minZoomLevel={11}
-              maxZoomLevel={18}
+              maxZoomLevel={16}
             >
               <MapLibreGL.RasterLayer
                 id="offline-mbtiles-layer"
@@ -218,7 +218,7 @@ export default function MapScreen() {
 
           {/* Route Polyline */}
           {selectedRoute?.geojson && (
-            <ShapeSource id="routeSource" shape={selectedRoute.geojson}>
+            <ShapeSource id="routeSource" shape={selectedRoute.geojson} maxZoomLevel={22}>
               <LineLayer
                 id="routeLayer"
                 style={{

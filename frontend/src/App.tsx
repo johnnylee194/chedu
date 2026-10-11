@@ -17,6 +17,8 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [showBuffer, setShowBuffer] = useState(false);
   const [useOfflineTiles, setUseOfflineTiles] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
 
   const centerRoute = () => {
       if (selectedRoute?.geojson && map.current) {
@@ -129,6 +131,8 @@ export default function App() {
       const res = await axios.get(`${API_BASE}/routes/${routeId}`);
       const route = res.data;
       setSelectedRoute(route);
+      setEditTitle(route.title);
+      setIsEditingTitle(false);
 
       const estRes = await axios.get(`${API_BASE}/routes/${routeId}/estimate-tiles`);
       setEstimation(estRes.data);
@@ -247,6 +251,22 @@ export default function App() {
       }
   };
 
+  const handleRename = async () => {
+      if (!selectedRoute) return;
+      try {
+          await axios.put(`${API_BASE}/routes/${selectedRoute.id}`, {
+              ...selectedRoute,
+              title: editTitle
+          });
+          setIsEditingTitle(false);
+          await fetchRoutes();
+          setSelectedRoute((prev: any) => ({ ...prev, title: editTitle }));
+      } catch (e) {
+          console.error(e);
+          alert('重命名失败');
+      }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50">
       {/* Sidebar */}
@@ -287,7 +307,45 @@ export default function App() {
         {selectedRoute && (
             <div className="p-4 bg-white shrink-0">
                 <div className="flex justify-between items-center mb-2">
-                    <h2 className="font-bold text-gray-800 truncate" style={{ flex: 1 }}>{selectedRoute.title}</h2>
+                    {isEditingTitle ? (
+                        <div className="flex items-center flex-1 mr-2">
+                            <input
+                                type="text"
+                                value={editTitle}
+                                onChange={e => setEditTitle(e.target.value)}
+                                className="border rounded px-2 py-1 flex-1 text-sm mr-2"
+                                autoFocus
+                            />
+                            <button
+                                onClick={handleRename}
+                                className="bg-green-100 hover:bg-green-200 text-green-700 text-xs py-1 px-2 rounded font-medium mr-1 transition shrink-0"
+                            >
+                                保存
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setIsEditingTitle(false);
+                                    setEditTitle(selectedRoute.title);
+                                }}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded font-medium transition shrink-0"
+                            >
+                                取消
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center flex-1 mr-2 overflow-hidden">
+                            <h2 className="font-bold text-gray-800 truncate" style={{ flex: 1 }}>{selectedRoute.title}</h2>
+                            <button
+                                onClick={() => {
+                                    setIsEditingTitle(true);
+                                    setEditTitle(selectedRoute.title);
+                                }}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                            >
+                                编辑
+                            </button>
+                        </div>
+                    )}
                     <button
                         onClick={centerRoute}
                         className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
