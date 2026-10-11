@@ -106,16 +106,16 @@ export default function MapScreen() {
   const handleSync = async () => {
     if (loading) return;
     setLoading(true);
-    setSyncStatus('Syncing...');
+    setSyncStatus('同步中...');
     try {
       const synced = await syncRoutes();
       setRoutes(synced);
-      setSyncStatus('Synced successfully.');
+      setSyncStatus('同步成功。');
       if (!selectedRoute && synced.length > 0) {
         handleRouteSelect(synced[0]);
       }
     } catch (e) {
-      setSyncStatus('Offline or sync failed. Using cached routes.');
+      setSyncStatus('离线或同步失败，使用缓存路线。');
     } finally {
       setLoading(false);
     }
@@ -130,6 +130,18 @@ export default function MapScreen() {
         [minLng, minLat],
         50, // padding
         1000 // duration
+      );
+    }
+  };
+
+  const handleCenterRoute = () => {
+    if (selectedRoute?.bbox && cameraRef.current) {
+      const [minLng, minLat, maxLng, maxLat] = selectedRoute.bbox;
+      cameraRef.current.fitBounds(
+        [maxLng, maxLat],
+        [minLng, minLat],
+        50,
+        1000
       );
     }
   };
@@ -227,7 +239,7 @@ export default function MapScreen() {
           style={({ pressed }) => [styles.settingsButton, pressed && { opacity: 0.7 }]}
           onPress={() => setSettingsVisible(true)}
         >
-          <Text style={styles.settingsButtonText}>⚙️ Settings</Text>
+          <Text style={styles.settingsButtonText}>⚙️ 设置</Text>
         </Pressable>
 
         {/* Off-Road Driving HUD */}
@@ -237,7 +249,7 @@ export default function MapScreen() {
       {/* Bottom Drawer UI */}
       <View style={styles.drawer}>
         <View style={styles.drawerHeader}>
-          <Text style={styles.drawerTitle}>Routes</Text>
+          <Text style={styles.drawerTitle}>路线列表</Text>
           <View style={styles.syncContainer}>
             <Text style={styles.syncStatus}>{syncStatus}</Text>
             <Pressable
@@ -245,7 +257,7 @@ export default function MapScreen() {
               onPress={handleSync}
               disabled={loading}
             >
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.syncButtonText}>Sync</Text>}
+              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.syncButtonText}>同步</Text>}
             </Pressable>
           </View>
         </View>
@@ -268,19 +280,29 @@ export default function MapScreen() {
                 onPress={() => handleRouteSelect(item)}
               >
                 <View style={styles.routeInfo}>
-                  <Text style={styles.routeName}>{item.title || 'Unnamed Route'}</Text>
+                  <Text style={styles.routeName}>{item.title || '未命名路线'}</Text>
                   <Text style={styles.routeDetails}>
                     {item.total_distance !== undefined && item.total_distance !== null ? Number(item.total_distance).toFixed(1) + ' km' : '0.0 km'}
                   </Text>
-                  {selectedRoute?.id === item.id && isDownloaded && (
-                     <Pressable
-                       style={styles.offlineToggle}
-                       onPress={() => setOfflineMapMode(!offlineMapMode)}
-                     >
-                       <Text style={styles.offlineToggleText}>
-                         {offlineMapMode ? '✅ Offline Map Active' : '🔄 Switch to Offline Map'}
-                       </Text>
-                     </Pressable>
+                  {selectedRoute?.id === item.id && (
+                     <View style={styles.selectedRouteActions}>
+                       <Pressable
+                         style={styles.centerRouteButton}
+                         onPress={handleCenterRoute}
+                       >
+                         <Text style={styles.centerRouteButtonText}>🎯 居中路线</Text>
+                       </Pressable>
+                       {isDownloaded && (
+                         <Pressable
+                           style={styles.offlineToggle}
+                           onPress={() => setOfflineMapMode(!offlineMapMode)}
+                         >
+                           <Text style={styles.offlineToggleText}>
+                             {offlineMapMode ? '✅ 离线地图已启用' : '🔄 切换至离线地图'}
+                           </Text>
+                         </Pressable>
+                       )}
+                     </View>
                   )}
                 </View>
 
@@ -291,7 +313,7 @@ export default function MapScreen() {
                         style={[styles.downloadButton, styles.deleteButton]}
                         onPress={() => handleDelete(item.id)}
                       >
-                        <Text style={styles.downloadButtonText}>Delete</Text>
+                        <Text style={styles.downloadButtonText}>删除</Text>
                       </Pressable>
                     ) : (
                       <Pressable
@@ -300,7 +322,7 @@ export default function MapScreen() {
                         disabled={isDownloading}
                       >
                         <Text style={styles.downloadButtonText}>
-                          {isDownloading ? `${(progress * 100).toFixed(0)}%` : 'Download'}
+                          {isDownloading ? `${(progress * 100).toFixed(0)}%` : '下载'}
                         </Text>
                       </Pressable>
                     )}
@@ -309,16 +331,16 @@ export default function MapScreen() {
               </Pressable>
             );
           }}
-          ListEmptyComponent={<Text style={styles.emptyText}>No routes found.</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>未找到路线。</Text>}
         />
       </View>
 
-      {/* Settings Modal */}
+      {/* 设置 Modal */}
       <Modal visible={settingsVisible} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Settings</Text>
-            <Text style={styles.inputLabel}>Server URL</Text>
+            <Text style={styles.modalTitle}>设置</Text>
+            <Text style={styles.inputLabel}>服务器地址</Text>
             <TextInput
               style={styles.input}
               value={serverUrlInput}
@@ -331,13 +353,13 @@ export default function MapScreen() {
                 style={({ pressed }) => [styles.modalButton, styles.cancelButton, pressed && { opacity: 0.7 }]}
                 onPress={() => setSettingsVisible(false)}
               >
-                <Text style={styles.buttonText}>Cancel</Text>
+                <Text style={styles.buttonText}>取消</Text>
               </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.modalButton, pressed && { opacity: 0.7 }]}
                 onPress={saveSettings}
               >
-                <Text style={styles.buttonText}>Save</Text>
+                <Text style={styles.buttonText}>保存</Text>
               </Pressable>
             </View>
           </View>
@@ -483,6 +505,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
     color: '#888',
+  },
+  selectedRouteActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 10,
+  },
+  centerRouteButton: {
+    padding: 6,
+    backgroundColor: '#e6f2ff',
+    borderRadius: 4,
+  },
+  centerRouteButtonText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,

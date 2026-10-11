@@ -18,6 +18,13 @@ export default function App() {
   const [showBuffer, setShowBuffer] = useState(false);
   const [useOfflineTiles, setUseOfflineTiles] = useState(false);
 
+  const centerRoute = () => {
+      if (selectedRoute?.geojson && map.current) {
+          const bbox = turf.bbox(selectedRoute.geojson) as [number, number, number, number];
+          map.current.fitBounds(bbox, { padding: 50, duration: 800 });
+      }
+  };
+
   useEffect(() => {
     fetchRoutes();
   }, []);
@@ -99,7 +106,7 @@ export default function App() {
       const data = uploadRes.data.data;
 
       const payload = {
-          title: data.metadata.name || 'New Route',
+          title: data.metadata.name || '新路线',
           description: data.metadata.description || '',
           total_distance: data.metadata.total_distance,
           total_ascent: data.metadata.total_ascent,
@@ -110,7 +117,7 @@ export default function App() {
       await fetchRoutes();
     } catch (err) {
       console.error('Upload failed', err);
-      alert('Upload failed. Check console.');
+      alert('上传失败，请查看控制台。');
     } finally {
       setIsUploading(false);
       e.target.value = '';
@@ -236,7 +243,7 @@ export default function App() {
           setJobStatus({ status: 'downloading', downloaded: 0, total: estimation?.totalTiles || 100 });
       } catch (e) {
           console.error(e);
-          alert('Failed to start build');
+          alert('构建启动失败');
       }
   };
 
@@ -245,17 +252,17 @@ export default function App() {
       {/* Sidebar */}
       <div className="w-96 bg-white shadow-lg flex flex-col z-10">
         <div className="p-4 bg-blue-600 text-white flex items-center justify-between">
-            <h1 className="text-xl font-bold flex items-center"><Database className="mr-2" /> Chedu Console</h1>
+            <h1 className="text-xl font-bold flex items-center"><Database className="mr-2" /> Chedu 控制台</h1>
             <label className="cursor-pointer bg-blue-500 hover:bg-blue-400 p-2 rounded text-sm flex items-center">
                 <Upload size={16} className="mr-1" />
-                {isUploading ? 'Uploading...' : 'Upload Route'}
+                {isUploading ? '上传中...' : '上传路线'}
                 <input type="file" accept=".kml,.kmz,.gpx" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
             </label>
         </div>
 
         <div className="flex-1 overflow-y-auto border-b">
             <div className="p-2 bg-gray-100 font-semibold text-sm text-gray-600 flex items-center">
-                <List size={16} className="mr-1" /> Saved Routes
+                <List size={16} className="mr-1" /> 已保存路线
             </div>
             <ul>
                 {routes.map(r => (
@@ -267,29 +274,37 @@ export default function App() {
                         <div className="font-medium text-gray-800 truncate">{r.title}</div>
                         <div className="text-xs text-gray-500 mt-1 flex justify-between">
                             <span>{r.total_distance} km</span>
-                            {r.tile_status === 'completed' && <span className="text-green-600 flex items-center"><CheckCircle2 size={12} className="mr-1" /> Ready</span>}
-                            {r.tile_status === 'downloading' && <span className="text-yellow-600">Building...</span>}
+                            {r.tile_status === 'completed' && <span className="text-green-600 flex items-center"><CheckCircle2 size={12} className="mr-1" /> 就绪</span>}
+                            {r.tile_status === 'downloading' && <span className="text-yellow-600">构建中...</span>}
                         </div>
                     </li>
                 ))}
-                {routes.length === 0 && <div className="p-4 text-gray-400 text-sm text-center">No routes. Upload a GPX/KML to begin.</div>}
+                {routes.length === 0 && <div className="p-4 text-gray-400 text-sm text-center">暂无路线，请上传 GPX/KML 开始。</div>}
             </ul>
         </div>
 
         {/* Selected Route Actions */}
         {selectedRoute && (
             <div className="p-4 bg-white shrink-0">
-                <h2 className="font-bold text-gray-800 mb-2 truncate">{selectedRoute.title}</h2>
+                <div className="flex justify-between items-center mb-2">
+                    <h2 className="font-bold text-gray-800 truncate" style={{ flex: 1 }}>{selectedRoute.title}</h2>
+                    <button
+                        onClick={centerRoute}
+                        className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                    >
+                        🎯 居中路线
+                    </button>
+                </div>
 
                 {estimation && (
                     <div className="bg-gray-50 p-3 rounded text-sm mb-4 border">
-                        <div className="font-semibold text-gray-700 mb-1">1km Corridor Estimate:</div>
+                        <div className="font-semibold text-gray-700 mb-1">1公里缓冲带预估：</div>
                         <div className="flex justify-between text-gray-600 mb-1">
-                            <span>Tiles (Z11-16):</span>
+                            <span>瓦片数 (Z11-16):</span>
                             <span className="font-mono">{estimation.totalTiles}</span>
                         </div>
                         <div className="flex justify-between text-gray-600">
-                            <span>Est. Size:</span>
+                            <span>预估大小:</span>
                             <span className="font-mono">{estimation.estimatedMB.toFixed(1)} MB</span>
                         </div>
                     </div>
@@ -298,7 +313,7 @@ export default function App() {
                 {jobStatus?.status === 'downloading' ? (
                     <div className="mb-4">
                         <div className="flex justify-between text-xs text-gray-500 mb-1">
-                            <span>Building MBTiles...</span>
+                            <span>正在构建离线地图包...</span>
                             <span>{jobStatus.downloaded} / {jobStatus.total}</span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2.5">
@@ -308,7 +323,7 @@ export default function App() {
                 ) : jobStatus?.status === 'failed' ? (
                      <div className="mb-4 p-2 bg-red-50 text-red-700 rounded text-sm flex items-start">
                          <AlertCircle size={16} className="mr-1 shrink-0 mt-0.5" />
-                         <span>Build failed: {jobStatus.errorMessage || 'Unknown error'}</span>
+                         <span>构建失败: {jobStatus.errorMessage || '未知错误'}</span>
                      </div>
                 ) : jobStatus?.status === 'completed' ? (
                     <a
@@ -316,21 +331,21 @@ export default function App() {
                         className="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded flex items-center justify-center font-medium mb-4 transition"
                         download
                     >
-                        <Download size={18} className="mr-2" /> Download .mbtiles
+                        <Download size={18} className="mr-2" /> 下载 .mbtiles
                     </a>
                 ) : (
                     <button
                         onClick={startMBTilesBuild}
                         className="w-full bg-blue-600 hover:bg-blue-700 text-white p-2 rounded font-medium mb-4 transition"
                     >
-                        Build Offline .mbtiles
+                        构建离线地图包
                     </button>
                 )}
 
                 <div className="space-y-2">
                     <label className="flex items-center text-sm cursor-pointer text-gray-700">
                         <input type="checkbox" checked={showBuffer} onChange={e => setShowBuffer(e.target.checked)} className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300" />
-                        Show 1.0km Corridor Overlay
+                        显示 1 公里缓冲带
                     </label>
                     <label className={`flex items-center text-sm cursor-pointer ${jobStatus?.status !== 'completed' ? 'opacity-50' : 'text-gray-700'}`}>
                         <input
@@ -341,7 +356,7 @@ export default function App() {
                             className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300"
                         />
                         <Layers size={14} className="mr-1 inline" />
-                        Preview Local .mbtiles (Z11-16)
+                        预览本地离线包 (Z11-16)
                     </label>
                 </div>
             </div>
