@@ -142,6 +142,8 @@ export async function buildMBTiles(
   insertMeta.run('format', 'jpg');
   insertMeta.run('bounds', bbox.join(','));
   insertMeta.run('center', `${centerLon},${centerLat},13`);
+  insertMeta.run('minzoom', '11');
+  insertMeta.run('maxzoom', '16');
 
   const insertTile = db.prepare('INSERT OR IGNORE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)');
 

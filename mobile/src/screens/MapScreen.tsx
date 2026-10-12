@@ -204,7 +204,7 @@ export default function MapScreen() {
           {offlineMapMode && selectedRoute && downloadedRoutes.has(selectedRoute.id) && (
             <MapLibreGL.RasterSource
               id="offline-mbtiles"
-              tileUrlTemplates={[getMBTilesUri(selectedRoute.id)]}
+              url={getMBTilesUri(selectedRoute.id)}
               tileSize={256}
               minZoomLevel={11}
               maxZoomLevel={16}
