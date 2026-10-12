@@ -267,6 +267,21 @@ export default function App() {
       }
   };
 
+  const handleDeleteRoute = async () => {
+      if (!selectedRoute) return;
+      const confirmDelete = window.confirm('确定要删除这条路线吗？');
+      if (!confirmDelete) return;
+
+      try {
+          await axios.delete(`${API_BASE}/routes/${selectedRoute.id}`);
+          setSelectedRoute(null);
+          await fetchRoutes();
+      } catch (e) {
+          console.error(e);
+          alert('删除路线失败');
+      }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50">
       {/* Sidebar */}
@@ -346,12 +361,20 @@ export default function App() {
                             </button>
                         </div>
                     )}
-                    <button
-                        onClick={centerRoute}
-                        className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
-                    >
-                        🎯 居中路线
-                    </button>
+                    <div className="flex shrink-0">
+                        <button
+                            onClick={centerRoute}
+                            className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                        >
+                            🎯 居中路线
+                        </button>
+                        <button
+                            onClick={handleDeleteRoute}
+                            className="bg-red-100 hover:bg-red-200 text-red-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                        >
+                            🗑️ 删除
+                        </button>
+                    </div>
                 </div>
 
                 {estimation && (
@@ -384,13 +407,21 @@ export default function App() {
                          <span>构建失败: {jobStatus.errorMessage || '未知错误'}</span>
                      </div>
                 ) : jobStatus?.status === 'completed' ? (
-                    <a
-                        href={`${API_BASE}/routes/${selectedRoute.id}/mbtiles`}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded flex items-center justify-center font-medium mb-4 transition"
-                        download
-                    >
-                        <Download size={18} className="mr-2" /> 下载 .mbtiles
-                    </a>
+                    <div className="mb-4">
+                        <a
+                            href={`${API_BASE}/routes/${selectedRoute.id}/mbtiles`}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded flex items-center justify-center font-medium mb-2 transition"
+                            download
+                        >
+                            <Download size={18} className="mr-2" /> 下载 .mbtiles
+                        </a>
+                        <button
+                            onClick={startMBTilesBuild}
+                            className="w-full bg-gray-500 hover:bg-gray-600 text-white p-2 rounded font-medium transition"
+                        >
+                            🔄 重新构建
+                        </button>
+                    </div>
                 ) : (
                     <button
                         onClick={startMBTilesBuild}
