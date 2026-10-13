@@ -17,6 +17,8 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [showBuffer, setShowBuffer] = useState(false);
   const [useOfflineTiles, setUseOfflineTiles] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
 
   const centerRoute = () => {
       if (selectedRoute?.geojson && map.current) {
@@ -129,6 +131,8 @@ export default function App() {
       const res = await axios.get(`${API_BASE}/routes/${routeId}`);
       const route = res.data;
       setSelectedRoute(route);
+      setEditTitle(route.title);
+      setIsEditingTitle(false);
 
       const estRes = await axios.get(`${API_BASE}/routes/${routeId}/estimate-tiles`);
       setEstimation(estRes.data);
@@ -247,6 +251,37 @@ export default function App() {
       }
   };
 
+  const handleRename = async () => {
+      if (!selectedRoute) return;
+      try {
+          await axios.put(`${API_BASE}/routes/${selectedRoute.id}`, {
+              ...selectedRoute,
+              title: editTitle
+          });
+          setIsEditingTitle(false);
+          await fetchRoutes();
+          setSelectedRoute((prev: any) => ({ ...prev, title: editTitle }));
+      } catch (e) {
+          console.error(e);
+          alert('重命名失败');
+      }
+  };
+
+  const handleDeleteRoute = async () => {
+      if (!selectedRoute) return;
+      const confirmDelete = window.confirm('确定要删除这条路线吗？');
+      if (!confirmDelete) return;
+
+      try {
+          await axios.delete(`${API_BASE}/routes/${selectedRoute.id}`);
+          setSelectedRoute(null);
+          await fetchRoutes();
+      } catch (e) {
+          console.error(e);
+          alert('删除路线失败');
+      }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-50">
       {/* Sidebar */}
@@ -287,13 +322,59 @@ export default function App() {
         {selectedRoute && (
             <div className="p-4 bg-white shrink-0">
                 <div className="flex justify-between items-center mb-2">
-                    <h2 className="font-bold text-gray-800 truncate" style={{ flex: 1 }}>{selectedRoute.title}</h2>
-                    <button
-                        onClick={centerRoute}
-                        className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
-                    >
-                        🎯 居中路线
-                    </button>
+                    {isEditingTitle ? (
+                        <div className="flex items-center flex-1 mr-2">
+                            <input
+                                type="text"
+                                value={editTitle}
+                                onChange={e => setEditTitle(e.target.value)}
+                                className="border rounded px-2 py-1 flex-1 text-sm mr-2"
+                                autoFocus
+                            />
+                            <button
+                                onClick={handleRename}
+                                className="bg-green-100 hover:bg-green-200 text-green-700 text-xs py-1 px-2 rounded font-medium mr-1 transition shrink-0"
+                            >
+                                保存
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setIsEditingTitle(false);
+                                    setEditTitle(selectedRoute.title);
+                                }}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded font-medium transition shrink-0"
+                            >
+                                取消
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center flex-1 mr-2 overflow-hidden">
+                            <h2 className="font-bold text-gray-800 truncate" style={{ flex: 1 }}>{selectedRoute.title}</h2>
+                            <button
+                                onClick={() => {
+                                    setIsEditingTitle(true);
+                                    setEditTitle(selectedRoute.title);
+                                }}
+                                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                            >
+                                编辑
+                            </button>
+                        </div>
+                    )}
+                    <div className="flex shrink-0">
+                        <button
+                            onClick={centerRoute}
+                            className="bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                        >
+                            🎯 居中路线
+                        </button>
+                        <button
+                            onClick={handleDeleteRoute}
+                            className="bg-red-100 hover:bg-red-200 text-red-700 text-xs py-1 px-2 rounded font-medium ml-2 transition shrink-0"
+                        >
+                            🗑️ 删除
+                        </button>
+                    </div>
                 </div>
 
                 {estimation && (
@@ -326,13 +407,21 @@ export default function App() {
                          <span>构建失败: {jobStatus.errorMessage || '未知错误'}</span>
                      </div>
                 ) : jobStatus?.status === 'completed' ? (
-                    <a
-                        href={`${API_BASE}/routes/${selectedRoute.id}/mbtiles`}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded flex items-center justify-center font-medium mb-4 transition"
-                        download
-                    >
-                        <Download size={18} className="mr-2" /> 下载 .mbtiles
-                    </a>
+                    <div className="mb-4">
+                        <a
+                            href={`${API_BASE}/routes/${selectedRoute.id}/mbtiles`}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white p-2 rounded flex items-center justify-center font-medium mb-2 transition"
+                            download
+                        >
+                            <Download size={18} className="mr-2" /> 下载 .mbtiles
+                        </a>
+                        <button
+                            onClick={startMBTilesBuild}
+                            className="w-full bg-gray-500 hover:bg-gray-600 text-white p-2 rounded font-medium transition"
+                        >
+                            🔄 重新构建
+                        </button>
+                    </div>
                 ) : (
                     <button
                         onClick={startMBTilesBuild}
