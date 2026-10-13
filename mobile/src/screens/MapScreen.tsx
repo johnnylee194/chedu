@@ -69,6 +69,7 @@ export default function MapScreen() {
   const [downloadingRoutes, setDownloadingRoutes] = useState<Record<number, number>>({}); // routeId -> progress (0-1)
 
   const cameraRef = useRef<any>(null);
+  const mapRef = useRef<any>(null);
 
   useEffect(() => {
     if (offlineMapMode && selectedRoute) {
@@ -205,11 +206,27 @@ export default function MapScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.mapContainer}>
         <MapView
+          ref={mapRef}
           style={styles.map}
           mapStyle={mapStyle}
           logoEnabled={false}
           attributionEnabled={false}
-          onRegionDidChange={(e: any) => console.log(`[Map View] Current Zoom: ${e.properties.zoomLevel.toFixed(2)}`)}
+          onRegionDidChange={async (e: any) => {
+            console.log(`[Map View] Current Zoom: ${e.properties.zoomLevel.toFixed(2)}`);
+            try {
+              if (mapRef.current) {
+                const style = await mapRef.current.getStyle();
+                if (style && style.layers) {
+                  const layerIds = style.layers.map((l: any) => l.id);
+                  const offlineIdx = layerIds.indexOf('offline-mbtiles-layer');
+                  const routeIdx = layerIds.indexOf('routeLayer');
+                  console.log(`[Map Layers] offline-mbtiles-layer Index: ${offlineIdx}, routeLayer Index: ${routeIdx}`);
+                }
+              }
+            } catch (err) {
+              console.log('[Map Layers] Failed to get style');
+            }
+          }}
           onDidFailLoadingMap={(e: any) => console.error('[Map View] Failed to load map:', e)}
           onDidFinishLoadingMap={() => console.log('[Map View] Map loaded successfully')}
         >
