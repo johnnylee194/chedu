@@ -1,5 +1,6 @@
 // @ts-ignore
 import { createDownloadResumable } from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system/legacy';
 import { File, Directory, Paths } from 'expo-file-system';
 
 const getMBTilesDir = (): Directory => {
@@ -60,6 +61,14 @@ export const downloadMBTiles = async (
     const result = await downloadResumable.downloadAsync();
     if (result && result.status === 200) {
       onProgress(1);
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(file.uri);
+        if (fileInfo.exists) {
+          console.log(`[Offline Package] Download Complete. Path: ${file.uri}, Size: ${fileInfo.size} bytes`);
+        }
+      } catch (e) {
+        console.error('[Offline Package] File check failed', e);
+      }
       return true;
     } else {
       throw new Error(`Download failed with status ${result?.status}`);

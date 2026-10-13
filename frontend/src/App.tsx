@@ -223,14 +223,14 @@ export default function App() {
               type: 'raster',
               tiles: [`${API_BASE}/routes/${routeId}/tiles/{z}/{x}/{y}`],
               tileSize: 256,
-              minzoom: 11,
+              minzoom: 8,
               maxzoom: 16
           });
           m.addLayer({
               id: 'offline-basemap',
               type: 'raster',
               source: 'offline-mbtiles',
-              minzoom: 11,
+              minzoom: 8,
               maxzoom: 16
           }, 'route-buffer'); // insert below buffer
       } else {
@@ -381,7 +381,7 @@ export default function App() {
                     <div className="bg-gray-50 p-3 rounded text-sm mb-4 border">
                         <div className="font-semibold text-gray-700 mb-1">1公里缓冲带预估：</div>
                         <div className="flex justify-between text-gray-600 mb-1">
-                            <span>瓦片数 (Z11-16):</span>
+                            <span>瓦片数 (Z8-16):</span>
                             <span className="font-mono">{estimation.totalTiles}</span>
                         </div>
                         <div className="flex justify-between text-gray-600">
@@ -445,7 +445,7 @@ export default function App() {
                             className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300"
                         />
                         <Layers size={14} className="mr-1 inline" />
-                        预览本地离线包 (Z11-16)
+                        预览本地离线包 (Z8-16)
                     </label>
                 </div>
             </div>
