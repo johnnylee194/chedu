@@ -223,7 +223,7 @@ export default function MapScreen() {
               id="offline-mbtiles"
               url={getMBTilesUri(selectedRoute.id)}
               tileSize={256}
-              minZoomLevel={11}
+              minZoomLevel={8}
               maxZoomLevel={16}
             >
               <MapLibreGL.RasterLayer

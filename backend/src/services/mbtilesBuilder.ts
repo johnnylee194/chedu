@@ -83,7 +83,7 @@ function getTilesForRoute(geojson: any, zoomLevels: number[], bufferKm: number =
 
 export function estimateTilesForRoute(geojsonStr: string): TileEstimation {
   const geojson = JSON.parse(geojsonStr);
-  const tiles = getTilesForRoute(geojson, [11, 12, 13, 14, 15, 16], 1.0);
+  const tiles = getTilesForRoute(geojson, [8, 9, 10, 11, 12, 13, 14, 15, 16], 1.0);
 
   const breakdown: Record<number, number> = {};
   for (const t of tiles) {
@@ -106,7 +106,7 @@ export async function buildMBTiles(
   sourceUrlTemplate: string = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 ) {
   const geojson = JSON.parse(geojsonStr);
-  const tiles = getTilesForRoute(geojson, [11, 12, 13, 14, 15, 16], 1.0);
+  const tiles = getTilesForRoute(geojson, [8, 9, 10, 11, 12, 13, 14, 15, 16], 1.0);
 
   const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
   if (!fs.existsSync(mbtilesDir)) {
@@ -142,7 +142,7 @@ export async function buildMBTiles(
   insertMeta.run('format', 'jpg');
   insertMeta.run('bounds', bbox.join(','));
   insertMeta.run('center', `${centerLon},${centerLat},13`);
-  insertMeta.run('minzoom', '11');
+  insertMeta.run('minzoom', '8');
   insertMeta.run('maxzoom', '16');
 
   const insertTile = db.prepare('INSERT OR IGNORE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)');
