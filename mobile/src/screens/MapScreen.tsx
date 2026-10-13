@@ -22,6 +22,14 @@ try {
   console.error('Failed to set MapLibre access token:', e);
 }
 
+MapLibreGL.Logger.setLogCallback((log: any) => {
+  if (log.level === 'error' || log.level === 'warning') {
+    console.error(`[MapLibre Native] ${log.message}`);
+  }
+  return true;
+});
+MapLibreGL.Logger.setLogLevel('Verbose');
+
 const mapStyle = JSON.stringify({
   version: 8,
   sources: {
@@ -61,6 +69,12 @@ export default function MapScreen() {
   const [downloadingRoutes, setDownloadingRoutes] = useState<Record<number, number>>({}); // routeId -> progress (0-1)
 
   const cameraRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (offlineMapMode && selectedRoute) {
+      console.log(`[Offline Source] Mounting MBTiles: ${getMBTilesUri(selectedRoute.id)}`);
+    }
+  }, [offlineMapMode, selectedRoute]);
 
   useEffect(() => {
     // Offline-first startup flow
@@ -195,6 +209,9 @@ export default function MapScreen() {
           mapStyle={mapStyle}
           logoEnabled={false}
           attributionEnabled={false}
+          onRegionDidChange={(e: any) => console.log(`[Map View] Current Zoom: ${e.properties.zoomLevel.toFixed(2)}`)}
+          onDidFailLoadingMap={(e: any) => console.error('[Map View] Failed to load map:', e)}
+          onDidFinishLoadingMap={() => console.log('[Map View] Map loaded successfully')}
         >
           <Camera ref={cameraRef} />
 
