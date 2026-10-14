@@ -246,6 +246,7 @@ export default function MapScreen() {
               <MapLibreGL.RasterLayer
                 id="offline-mbtiles-layer"
                 style={{ rasterOpacity: 1 }}
+		belowLayerID="routeLayer"
               />
             </MapLibreGL.RasterSource>
           )}
