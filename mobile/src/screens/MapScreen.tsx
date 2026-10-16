@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView } from 'react-native';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, Pressable, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView, Vibration } from 'react-native';
 import * as MapLibreGLNamespace from '@maplibre/maplibre-react-native';
 import { syncRoutes, getCachedRoutes, RouteDetail, getServerUrl, saveServerUrl } from '../services/syncService';
 import { isMBTilesDownloaded, downloadMBTiles, deleteMBTiles, getMBTilesUri } from '../services/offlinePackageManager';
 import UserLocationLayer from '../components/UserLocationLayer';
 import LocationHUD from '../components/LocationHUD';
+import { useLocation } from '../context/LocationContext';
+import { calculateRouteMetrics } from '../utils/geoMath';
 
 const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
 const MapView = MapLibreGL.MapView ?? (MapLibreGLNamespace as any).MapView;
@@ -63,6 +65,11 @@ export default function MapScreen() {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [serverUrlInput, setServerUrlInput] = useState('');
 
+  // Tracking & Metrics States
+  const [isTracking, setIsTracking] = useState(false);
+  const [cameraFollow, setCameraFollow] = useState(false);
+  const { coords } = useLocation();
+
   // Offline Map States
   const [offlineMapMode, setOfflineMapMode] = useState(false);
   const [downloadedRoutes, setDownloadedRoutes] = useState<Set<number>>(new Set());
@@ -71,11 +78,72 @@ export default function MapScreen() {
   const cameraRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
 
+  const metrics = useMemo(() => {
+    if (!isTracking || !selectedRoute?.geojson || !coords) return null;
+    return calculateRouteMetrics([coords.longitude, coords.latitude], selectedRoute.geojson);
+  }, [isTracking, selectedRoute, coords]);
+
+  const deviation = metrics ? Math.round(metrics.distance) : null;
+  const snappedCoord = metrics ? metrics.snappedCoord : null;
+  const prevDeviationRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isTracking && deviation !== null) {
+      const prevDeviation = prevDeviationRef.current;
+      if ((prevDeviation === null || prevDeviation < 60) && deviation >= 60) {
+        Vibration.vibrate([0, 400, 200, 400]);
+      }
+      prevDeviationRef.current = deviation;
+    } else if (!isTracking) {
+      prevDeviationRef.current = null;
+    }
+  }, [deviation, isTracking]);
+
+  const deviationLineGeoJSON = useMemo(() => {
+    if (isTracking && deviation !== null && deviation >= 60 && coords && snappedCoord) {
+      return {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [coords.longitude, coords.latitude],
+                snappedCoord,
+              ],
+            },
+            properties: {},
+          },
+        ],
+      };
+    }
+    return null;
+  }, [isTracking, deviation, coords, snappedCoord]);
+
   useEffect(() => {
     if (offlineMapMode && selectedRoute) {
       console.log(`[Offline Source] Mounting MBTiles: ${getMBTilesUri(selectedRoute.id)}`);
     }
   }, [offlineMapMode, selectedRoute]);
+
+  useEffect(() => {
+    if (isTracking) {
+      setCameraFollow(true);
+    } else {
+      setCameraFollow(false);
+    }
+  }, [isTracking]);
+
+  useEffect(() => {
+    if (cameraFollow && coords && cameraRef.current) {
+      cameraRef.current.setCamera({
+        centerCoordinate: [coords.longitude, coords.latitude],
+        zoomLevel: 15,
+        animationDuration: 500,
+      });
+    }
+  }, [coords, cameraFollow]);
 
   useEffect(() => {
     // Offline-first startup flow
@@ -211,6 +279,11 @@ export default function MapScreen() {
           mapStyle={mapStyle}
           logoEnabled={false}
           attributionEnabled={false}
+          onRegionWillChange={(e: any) => {
+            if (e.properties.isUserInteraction) {
+              setCameraFollow(false);
+            }
+          }}
           onRegionDidChange={async (e: any) => {
             console.log(`[Map View] Current Zoom: ${e.properties.zoomLevel.toFixed(2)}`);
             try {
@@ -266,6 +339,23 @@ export default function MapScreen() {
             </ShapeSource>
           )}
 
+          {/* Deviation Warning Polyline */}
+          {deviationLineGeoJSON && (
+            <ShapeSource id="deviationSource" shape={deviationLineGeoJSON as any}>
+              <LineLayer
+                id="deviationLayer"
+                aboveLayerID="routeLayer"
+                style={{
+                  lineColor: '#FFD60A',
+                  lineWidth: 3,
+                  lineDasharray: [2, 2],
+                  lineJoin: 'round',
+                  lineCap: 'round',
+                }}
+              />
+            </ShapeSource>
+          )}
+
           {/* Real-time Vehicle Marker */}
           <UserLocationLayer />
         </MapView>
@@ -277,12 +367,22 @@ export default function MapScreen() {
           <Text style={styles.settingsButtonText}>⚙️ 设置</Text>
         </Pressable>
 
+        {/* Resume Follow Button */}
+        {isTracking && !cameraFollow && (
+          <Pressable
+            style={styles.resumeFollowButton}
+            onPress={() => setCameraFollow(true)}
+          >
+            <Text style={styles.resumeFollowButtonText}>📍 恢复跟随</Text>
+          </Pressable>
+        )}
+
         {/* Off-Road Driving HUD */}
-        <LocationHUD selectedRoute={selectedRoute} />
+        <LocationHUD isTracking={isTracking} deviation={deviation} />
       </View>
 
       {/* Bottom Drawer UI */}
-      <View style={styles.drawer}>
+      <View style={[styles.drawer, isTracking && styles.drawerCollapsed]}>
         <View style={styles.drawerHeader}>
           <Text style={styles.drawerTitle}>路线列表</Text>
           <View style={styles.syncContainer}>
@@ -333,10 +433,18 @@ export default function MapScreen() {
                            onPress={() => setOfflineMapMode(!offlineMapMode)}
                          >
                            <Text style={styles.offlineToggleText}>
-                             {offlineMapMode ? '✅ 离线地图已启用' : '🔄 切换至离线地图'}
+                             {offlineMapMode ? '✅ 离线地图' : '🔄 离线地图'}
                            </Text>
                          </Pressable>
                        )}
+                       <Pressable
+                         style={[styles.trackingToggle, isTracking && styles.trackingToggleActive]}
+                         onPress={() => setIsTracking(!isTracking)}
+                       >
+                         <Text style={[styles.trackingToggleText, isTracking && styles.trackingToggleTextActive]}>
+                           {isTracking ? '⏹️ 结束' : '🚀 开始循迹'}
+                         </Text>
+                       </Pressable>
                      </View>
                   )}
                 </View>
@@ -367,6 +475,7 @@ export default function MapScreen() {
             );
           }}
           ListEmptyComponent={<Text style={styles.emptyText}>未找到路线。</Text>}
+          style={isTracking ? { display: 'none' } : {}}
         />
       </View>
 
@@ -442,6 +551,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: -2 },
     elevation: 5,
+  },
+  drawerCollapsed: {
+    flex: 0,
   },
   drawerHeader: {
     flexDirection: 'row',
@@ -522,6 +634,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#007AFF',
     fontWeight: '600',
+  },
+  trackingToggle: {
+    marginTop: 8,
+    padding: 6,
+    backgroundColor: '#34C759',
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+  },
+  trackingToggleActive: {
+    backgroundColor: '#FF3B30',
+  },
+  trackingToggleText: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  trackingToggleTextActive: {
+    color: '#fff',
+  },
+  resumeFollowButton: {
+    position: 'absolute',
+    bottom: 80,
+    right: 10,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  resumeFollowButtonText: {
+    color: '#007AFF',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   selectedRouteItem: {
     borderColor: '#007AFF',
