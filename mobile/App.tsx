@@ -2,6 +2,7 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View, ScrollView, Pressable, SafeAreaView } from 'react-native';
 import MapScreen from './src/screens/MapScreen';
+import { LocationProvider } from './src/context/LocationContext';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -79,7 +80,9 @@ function MainApp() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <MainApp />
+      <LocationProvider>
+        <MainApp />
+      </LocationProvider>
     </ErrorBoundary>
   );
 }

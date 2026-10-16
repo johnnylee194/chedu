@@ -1,12 +1,12 @@
 import React from 'react';
 import * as MapLibreGLNamespace from '@maplibre/maplibre-react-native';
-import { useLocationService } from '../services/locationService';
+import { useLocation } from '../context/LocationContext';
 
 const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
 const ShapeSource = MapLibreGL.ShapeSource ?? (MapLibreGLNamespace as any).ShapeSource;
 
 export default function UserLocationLayer() {
-  const { coords, heading } = useLocationService();
+  const { coords, heading } = useLocation();
 
   if (!coords) return null;
 

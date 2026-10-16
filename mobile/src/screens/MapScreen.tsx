@@ -278,7 +278,7 @@ export default function MapScreen() {
         </Pressable>
 
         {/* Off-Road Driving HUD */}
-        <LocationHUD />
+        <LocationHUD selectedRoute={selectedRoute} />
       </View>
 
       {/* Bottom Drawer UI */}

@@ -1,5 +1,5 @@
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import * as Location from 'expo-location';
-import { useEffect, useState } from 'react';
 
 export interface LocationState {
   coords: {
@@ -13,7 +13,14 @@ export interface LocationState {
   error: string | null;
 }
 
-export const useLocationService = () => {
+// Extract the types
+export interface LocationContextState extends LocationState {
+  heading: number | null;
+}
+
+const LocationContext = createContext<LocationContextState | undefined>(undefined);
+
+export const LocationProvider = ({ children }: { children: ReactNode }) => {
   const [locationState, setLocationState] = useState<LocationState>({ coords: null, error: null });
   const [heading, setHeading] = useState<number | null>(null);
 
@@ -73,8 +80,17 @@ export const useLocationService = () => {
     };
   }, []);
 
-  return {
-    ...locationState,
-    heading, // Return true compass heading as a separate value if preferred
-  };
+  return (
+    <LocationContext.Provider value={{ ...locationState, heading }}>
+      {children}
+    </LocationContext.Provider>
+  );
+};
+
+export const useLocation = () => {
+  const context = useContext(LocationContext);
+  if (context === undefined) {
+    throw new Error('useLocation must be used within a LocationProvider');
+  }
+  return context;
 };
