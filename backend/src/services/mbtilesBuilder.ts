@@ -152,6 +152,7 @@ export async function buildMBTiles(
   run('UPDATE routes SET tile_status = ?, total_tiles = ?, downloaded_tiles = ? WHERE id = ?', ['downloading', tiles.length, 0, routeId]);
 
   const limit = pLimit(8);
+  let failedTilesCount = 0;
 
   const downloadTile = async (t: TileInfo) => {
     let url = sourceUrlTemplate.replace('{z}', t.z.toString()).replace('{x}', t.x.toString()).replace('{y}', t.y.toString());
@@ -177,6 +178,7 @@ export async function buildMBTiles(
         } catch (error) {
             if (attempt === 3) {
                 console.error(`Failed to download tile ${t.z}/${t.x}/${t.y} after 3 attempts`, error);
+                failedTilesCount++;
             } else {
                 await new Promise(r => setTimeout(r, 1000 * attempt));
             }
@@ -196,6 +198,7 @@ export async function buildMBTiles(
       activeJobs.set(routeId.toString(), { status: 'failed', total: tiles.length, downloaded: 0, error: err.message });
       run('UPDATE routes SET tile_status = ?, error_message = ? WHERE id = ?', ['failed', err.message, routeId]);
   } finally {
+      console.log(`[MBTiles Build Stats] Route ${routeId} finished. Total Target: ${tiles.length}, Failed/Dropped: ${failedTilesCount}`);
       db.close();
       setTimeout(() => activeJobs.delete(routeId.toString()), 60000); // clear memory after 1 minute
   }
