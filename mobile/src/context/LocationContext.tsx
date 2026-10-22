@@ -30,19 +30,38 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
     const startLocationTracking = async () => {
       try {
+        console.log('[LocationContext] Requesting permissions...');
         const { status } = await Location.requestForegroundPermissionsAsync();
+        console.log('[LocationContext] Permission status:', status);
+        
         if (status !== 'granted') {
           setLocationState({ coords: null, error: 'Permission to access location was denied' });
           return;
         }
 
-        // Location tracking (WGS-84, Altitude, Speed, Accuracy)
+        // --- 诊断日志 1：检查手机硬件定位开关是否真的打开了 ---
+        const providerStatus = await Location.getProviderStatusAsync();
+        console.log('[LocationContext] System Provider Status:', JSON.stringify(providerStatus));
+
+        // --- 诊断日志 2：对照组，看单次低精度定位是否能成功 ---
+        try {
+          console.log('[LocationContext] Trying single getCurrentPositionAsync (Balanced)...');
+          const singleLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          console.log('[LocationContext] Single fetch success. Lat:', singleLoc.coords.latitude, 'Lng:', singleLoc.coords.longitude);
+        } catch (e) {
+          console.error('[LocationContext] Single fetch failed:', e);
+        }
+
+        console.log('[LocationContext] Starting watchPositionAsync...');
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.BestForNavigation,
-            distanceInterval: 2, // Every 2 meters
+            timeInterval: 2000,
+            // --- 诊断日志 3：暂时注释掉 distanceInterval，看是不是被物理位移限制卡住了 ---
+            // distanceInterval: 2, 
           },
           (location) => {
+            console.log('[LocationContext] Coords received:', location.coords.latitude, location.coords.longitude, 'Acc:', location.coords.accuracy);
             setLocationState({
               coords: {
                 latitude: location.coords.latitude,
@@ -50,20 +69,22 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
                 altitude: location.coords.altitude,
                 accuracy: location.coords.accuracy,
                 speed: location.coords.speed,
-                heading: location.coords.heading, // Often unreliable on some devices, using watchHeadingAsync below as fallback/primary for compass
+                heading: location.coords.heading,
               },
               error: null,
             });
           }
         );
+        // --- 诊断日志 4：确认 API 没有默默挂起 ---
+        console.log('[LocationContext] watchPositionAsync started successfully');
 
-        // Heading tracking (Compass bearing)
         headingSubscription = await Location.watchHeadingAsync((headingData) => {
+          // 这里的日志由于频率太高可以暂时注释掉，避免干扰查看 GPS 坐标日志
+          // console.log('[LocationContext] Heading received:', headingData.trueHeading);
           setHeading(headingData.trueHeading !== -1 ? headingData.trueHeading : headingData.magHeading);
         });
-
       } catch (e) {
-        console.error('Error starting location tracking', e);
+        console.error('[LocationContext] Watch Error:', e);
         setLocationState({ coords: null, error: 'Error starting location tracking' });
       }
     };

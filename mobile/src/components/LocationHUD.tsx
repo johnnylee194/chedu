@@ -1,26 +1,29 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useLocation } from '../context/LocationContext';
-import { calculateRouteMetrics } from '../utils/geoMath';
-import { RouteDetail } from '../services/syncService';
 
 interface LocationHUDProps {
-  selectedRoute?: RouteDetail | null;
+  isTracking?: boolean;
+  deviation?: number | null;
 }
 
-export default function LocationHUD({ selectedRoute }: LocationHUDProps) {
+export default function LocationHUD({ isTracking = false, deviation = null }: LocationHUDProps) {
   const { coords } = useLocation();
 
-  const metrics = useMemo(() => {
-    if (!selectedRoute?.geojson || !coords) return null;
-    return calculateRouteMetrics([coords.longitude, coords.latitude], selectedRoute.geojson);
-  }, [selectedRoute, coords]);
+  if (isTracking && !coords) {
+    return (
+      <View style={[styles.hudContainer, { backgroundColor: 'rgba(234, 179, 8, 0.9)' }]}>
+        <View style={styles.row}>
+          <Text style={[styles.hudText, styles.hudTextLarge]}>⏳ 等待 GPS 信号定位中...</Text>
+        </View>
+      </View>
+    );
+  }
 
   const speedStr = coords?.speed !== null && coords?.speed !== undefined ? `${(coords.speed * 3.6).toFixed(1)} km/h` : '--';
   const altStr = coords?.altitude !== null && coords?.altitude !== undefined ? `${coords.altitude.toFixed(0)}m` : '--';
 
-  if (selectedRoute) {
-    const deviation = metrics ? Math.round(metrics.distance) : 0;
+  if (isTracking && deviation !== null) {
     const isOffRoute = deviation >= 60;
     const deviationText = isOffRoute ? `🔴 偏航报警 | 偏离: ${deviation}m` : `🟢 在轨 | 偏离: ${deviation}m`;
 
