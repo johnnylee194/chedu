@@ -42,6 +42,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
         locationSubscription = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.BestForNavigation,
+            timeInterval: 2000,
             distanceInterval: 2, // Every 2 meters
           },
           (location) => {
