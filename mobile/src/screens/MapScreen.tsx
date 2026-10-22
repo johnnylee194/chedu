@@ -367,6 +367,19 @@ export default function MapScreen() {
           <Text style={styles.settingsButtonText}>⚙️ 设置</Text>
         </Pressable>
 
+        {/* Exit Tracking Button */}
+        {isTracking && (
+          <Pressable
+            style={styles.exitTrackingButton}
+            onPress={() => {
+              setIsTracking(false);
+              setCameraFollow(false);
+            }}
+          >
+            <Text style={styles.exitTrackingButtonText}>⏹️ 退出循迹</Text>
+          </Pressable>
+        )}
+
         {/* Resume Follow Button */}
         {isTracking && !cameraFollow && (
           <Pressable
@@ -652,6 +665,26 @@ const styles = StyleSheet.create({
   },
   trackingToggleTextActive: {
     color: '#fff',
+  },
+  exitTrackingButton: {
+    position: 'absolute',
+    top: 50,
+    alignSelf: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  exitTrackingButtonText: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   resumeFollowButton: {
     position: 'absolute',

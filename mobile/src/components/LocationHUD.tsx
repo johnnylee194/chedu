@@ -10,6 +10,16 @@ interface LocationHUDProps {
 export default function LocationHUD({ isTracking = false, deviation = null }: LocationHUDProps) {
   const { coords } = useLocation();
 
+  if (isTracking && !coords) {
+    return (
+      <View style={[styles.hudContainer, { backgroundColor: 'rgba(234, 179, 8, 0.9)' }]}>
+        <View style={styles.row}>
+          <Text style={[styles.hudText, styles.hudTextLarge]}>⏳ 等待 GPS 信号定位中...</Text>
+        </View>
+      </View>
+    );
+  }
+
   const speedStr = coords?.speed !== null && coords?.speed !== undefined ? `${(coords.speed * 3.6).toFixed(1)} km/h` : '--';
   const altStr = coords?.altitude !== null && coords?.altitude !== undefined ? `${coords.altitude.toFixed(0)}m` : '--';
 

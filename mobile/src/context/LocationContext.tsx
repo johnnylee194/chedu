@@ -30,7 +30,9 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
     const startLocationTracking = async () => {
       try {
+        console.log('[LocationContext] Requesting permissions...');
         const { status } = await Location.requestForegroundPermissionsAsync();
+        console.log('[LocationContext] Permission status:', status);
         if (status !== 'granted') {
           setLocationState({ coords: null, error: 'Permission to access location was denied' });
           return;
@@ -43,6 +45,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
             distanceInterval: 2, // Every 2 meters
           },
           (location) => {
+            console.log('[LocationContext] Coords received:', location.coords.latitude, location.coords.longitude, 'Acc:', location.coords.accuracy);
             setLocationState({
               coords: {
                 latitude: location.coords.latitude,
@@ -59,11 +62,12 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
 
         // Heading tracking (Compass bearing)
         headingSubscription = await Location.watchHeadingAsync((headingData) => {
+          console.log('[LocationContext] Heading received:', headingData.trueHeading);
           setHeading(headingData.trueHeading !== -1 ? headingData.trueHeading : headingData.magHeading);
         });
 
       } catch (e) {
-        console.error('Error starting location tracking', e);
+        console.error('[LocationContext] Watch Error:', e);
         setLocationState({ coords: null, error: 'Error starting location tracking' });
       }
     };
