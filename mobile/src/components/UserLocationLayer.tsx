@@ -57,7 +57,7 @@ export default function UserLocationLayer() {
            id="userLocationHeadingLayer"
            style={{
              iconImage: 'arrow-up', // Assuming default icon or can use a custom loaded image
-             iconSize: 0.5,
+             iconSize: 0.3,
              iconRotate: heading,
              iconRotationAlignment: 'map',
              iconPitchAlignment: 'map',
