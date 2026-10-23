@@ -55,7 +55,7 @@ const mapStyle = JSON.stringify({
   ],
 });
 
-const MAP_IMAGES = { 'arrow-up': require('../../assets/icon.png') };
+const MAP_IMAGES = { 'arrow-up': require('../../assets/nav_arrow.png') };
 
 export default function MapScreen() {
   const [routes, setRoutes] = useState<RouteDetail[]>([]);

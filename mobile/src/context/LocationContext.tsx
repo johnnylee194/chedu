@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import * as Location from 'expo-location';
+import Geolocation from 'react-native-geolocation-service';
 
 export interface LocationState {
   coords: {
@@ -25,7 +26,7 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
   const [heading, setHeading] = useState<number | null>(null);
 
   useEffect(() => {
-    let locationSubscription: Location.LocationSubscription | null = null;
+    let watchId: number | null = null;
     let headingSubscription: Location.LocationSubscription | null = null;
 
     const startLocationTracking = async () => {
@@ -39,48 +40,37 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        // --- 诊断日志 1：检查手机硬件定位开关是否真的打开了 ---
-        const providerStatus = await Location.getProviderStatusAsync();
-        console.log('[LocationContext] System Provider Status:', JSON.stringify(providerStatus));
-
-        // --- 诊断日志 2：对照组，看单次低精度定位是否能成功 ---
-        try {
-          console.log('[LocationContext] Trying single getCurrentPositionAsync (Balanced)...');
-          const singleLoc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          console.log('[LocationContext] Single fetch success. Lat:', singleLoc.coords.latitude, 'Lng:', singleLoc.coords.longitude);
-        } catch (e) {
-          console.error('[LocationContext] Single fetch failed:', e);
-        }
-
-        console.log('[LocationContext] Starting watchPositionAsync...');
-        locationSubscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.BestForNavigation,
-            timeInterval: 2000,
-            // --- 诊断日志 3：暂时注释掉 distanceInterval，看是不是被物理位移限制卡住了 ---
-            // distanceInterval: 2, 
-          },
-          (location) => {
-            console.log('[LocationContext] Coords received:', location.coords.latitude, location.coords.longitude, 'Acc:', location.coords.accuracy);
+        console.log('[LocationContext] Starting Geolocation.watchPosition...');
+        watchId = Geolocation.watchPosition(
+          (position) => {
+            console.log('[LocationContext] Coords received:', position.coords.latitude, position.coords.longitude, 'Acc:', position.coords.accuracy);
             setLocationState({
               coords: {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                altitude: location.coords.altitude,
-                accuracy: location.coords.accuracy,
-                speed: location.coords.speed,
-                heading: location.coords.heading,
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude,
+                altitude: position.coords.altitude,
+                accuracy: position.coords.accuracy,
+                speed: position.coords.speed,
+                heading: position.coords.heading,
               },
               error: null,
             });
+          },
+          (error) => {
+            console.error('[LocationContext] Geolocation Error:', error);
+            setLocationState({ coords: null, error: error.message });
+          },
+          {
+            enableHighAccuracy: true,
+            distanceFilter: 2,
+            interval: 2000,
+            fastestInterval: 1000,
+            forceLocationManager: true
           }
         );
-        // --- 诊断日志 4：确认 API 没有默默挂起 ---
-        console.log('[LocationContext] watchPositionAsync started successfully');
+        console.log('[LocationContext] watchPosition started successfully with id', watchId);
 
         headingSubscription = await Location.watchHeadingAsync((headingData) => {
-          // 这里的日志由于频率太高可以暂时注释掉，避免干扰查看 GPS 坐标日志
-          // console.log('[LocationContext] Heading received:', headingData.trueHeading);
           setHeading(headingData.trueHeading !== -1 ? headingData.trueHeading : headingData.magHeading);
         });
       } catch (e) {
@@ -92,8 +82,8 @@ export const LocationProvider = ({ children }: { children: ReactNode }) => {
     startLocationTracking();
 
     return () => {
-      if (locationSubscription) {
-        locationSubscription.remove();
+      if (watchId !== null) {
+        Geolocation.clearWatch(watchId);
       }
       if (headingSubscription) {
         headingSubscription.remove();
