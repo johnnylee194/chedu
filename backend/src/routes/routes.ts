@@ -4,16 +4,31 @@ import { estimateTilesForRoute, buildMBTiles, getJobStatus } from '../services/m
 import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
+import { authenticate, requireAdmin } from '../middleware/auth';
 
 const router = Router();
 
+// Require authentication for all route endpoints
+router.use(authenticate);
+
 router.get('/', (req: Request, res: Response) => {
   try {
-    const routes = query(`
-      SELECT *
-      FROM routes
-      ORDER BY created_at DESC
-    `);
+    let routes;
+    if (req.user!.role === 'admin') {
+      routes = query(`
+        SELECT *
+        FROM routes
+        ORDER BY created_at DESC
+      `);
+    } else {
+      routes = query(`
+        SELECT r.*
+        FROM routes r
+        INNER JOIN user_routes ur ON r.id = ur.route_id
+        WHERE ur.user_id = ?
+        ORDER BY r.created_at DESC
+      `, [req.user!.userId]);
+    }
 
     // Safely parse geojson
     const parsedRoutes = routes.map((r: any) => {
@@ -34,6 +49,13 @@ router.get('/', (req: Request, res: Response) => {
 router.get('/:id', (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
+
+    if (req.user!.role !== 'admin') {
+      const access = queryOne('SELECT 1 FROM user_routes WHERE user_id = ? AND route_id = ?', [req.user!.userId, routeId]);
+      if (!access) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this route' });
+      }
+    }
 
     const routes = query('SELECT * FROM routes WHERE id = ?', [routeId]);
     const route = routes[0] as any;
@@ -63,7 +85,7 @@ router.get('/:id', (req: Request, res: Response) => {
   }
 });
 
-router.post('/', (req: Request, res: Response) => {
+router.post('/', requireAdmin, (req: Request, res: Response) => {
   try {
     const {
       title,
@@ -122,7 +144,7 @@ router.post('/', (req: Request, res: Response) => {
   }
 });
 
-router.put('/:id', (req: Request, res: Response) => {
+router.put('/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
     const {
@@ -160,7 +182,7 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 });
 
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', requireAdmin, (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
 
@@ -175,6 +197,14 @@ router.delete('/:id', (req: Request, res: Response) => {
 router.get('/:id/estimate-tiles', (req: Request, res: Response) => {
   try {
     const routeId = req.params.id;
+
+    if (req.user!.role !== 'admin') {
+      const access = queryOne('SELECT 1 FROM user_routes WHERE user_id = ? AND route_id = ?', [req.user!.userId, routeId]);
+      if (!access) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this route' });
+      }
+    }
+
     const route = queryOne('SELECT geojson FROM routes WHERE id = ?', [routeId]);
     if (!route || !route.geojson) {
        return res.status(404).json({ error: 'Route or geojson not found' });
@@ -187,7 +217,7 @@ router.get('/:id/estimate-tiles', (req: Request, res: Response) => {
   }
 });
 
-router.post('/:id/build-mbtiles', (req: Request, res: Response) => {
+router.post('/:id/build-mbtiles', requireAdmin, (req: Request, res: Response) => {
     try {
         const routeId = parseInt(req.params.id);
         const route = queryOne('SELECT geojson FROM routes WHERE id = ?', [routeId]);
@@ -210,6 +240,13 @@ router.get('/:id/tile-status', (req: Request, res: Response) => {
     try {
         const routeId = req.params.id;
 
+        if (req.user!.role !== 'admin') {
+          const access = queryOne('SELECT 1 FROM user_routes WHERE user_id = ? AND route_id = ?', [req.user!.userId, routeId]);
+          if (!access) {
+            return res.status(403).json({ error: 'Forbidden: You do not have access to this route' });
+          }
+        }
+
         // check memory first for live updates
         const activeJob = getJobStatus(routeId);
         if (activeJob) {
@@ -230,6 +267,14 @@ router.get('/:id/tile-status', (req: Request, res: Response) => {
 router.get('/:id/mbtiles', (req: Request, res: Response) => {
     try {
         const routeId = req.params.id;
+
+        if (req.user!.role !== 'admin') {
+          const access = queryOne('SELECT 1 FROM user_routes WHERE user_id = ? AND route_id = ?', [req.user!.userId, routeId]);
+          if (!access) {
+            return res.status(403).json({ error: 'Forbidden: You do not have access to this route' });
+          }
+        }
+
         const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
         const dbPath = path.join(mbtilesDir, `route_${routeId}.mbtiles`);
 
@@ -246,6 +291,14 @@ router.get('/:id/mbtiles', (req: Request, res: Response) => {
 router.get('/:id/tiles/:z/:x/:y', (req: Request, res: Response) => {
     try {
         const { id, z, x, y } = req.params;
+
+        if (req.user!.role !== 'admin') {
+          const access = queryOne('SELECT 1 FROM user_routes WHERE user_id = ? AND route_id = ?', [req.user!.userId, id]);
+          if (!access) {
+            return res.status(403).json({ error: 'Forbidden: You do not have access to this route' });
+          }
+        }
+
         const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
         const dbPath = path.join(mbtilesDir, `route_${id}.mbtiles`);
 

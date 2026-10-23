@@ -16,6 +16,15 @@ export const initDatabase = async () => {
   db.pragma('journal_mode = WAL');
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT CHECK(role IN ('admin', 'user')) NOT NULL DEFAULT 'user',
+      token_version INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS routes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -63,6 +72,14 @@ export const initDatabase = async () => {
       image_url TEXT NOT NULL,
       caption TEXT,
       order_index INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS user_routes (
+      user_id INTEGER NOT NULL,
+      route_id INTEGER NOT NULL,
+      PRIMARY KEY (user_id, route_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS idx_route_tracks_route_id ON route_tracks(route_id);

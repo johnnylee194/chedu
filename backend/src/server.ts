@@ -5,6 +5,8 @@ import path from 'path';
 import { initDatabase } from './database';
 import routeRoutes from './routes/routes';
 import uploadRoutes from './routes/upload';
+import authRouter from './routes/auth';
+import adminRouter from './routes/admin';
 
 dotenv.config();
 
@@ -23,6 +25,8 @@ app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || path.j
 
 app.use('/api/routes', routeRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Chedu API is running' });
