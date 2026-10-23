@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "init-admin": "ts-node scripts/init-admin.ts"
   },
   "keywords": [
     "offroad",
@@ -21,22 +22,27 @@
   "dependencies": {
     "@turf/turf": "^7.4.0",
     "axios": "^1.20.0",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-validator": "^7.0.1",
     "fast-xml-parser": "^4.3.2",
+    "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
     "multer": "^1.4.5-lts.1",
-    "p-limit": "^3.1.0"
+    "p-limit": "^3.1.0",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/geojson": "^7946.0.16",
     "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.10.6",
     "jest": "^30.5.2",
