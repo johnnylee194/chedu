@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { run, queryOne } from '../database';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
@@ -67,6 +68,40 @@ router.post('/login', async (req: Request, res: Response) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+router.put('/password', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.user!.userId;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ error: 'Old and new passwords are required' });
+    }
+
+    const user = queryOne('SELECT password_hash FROM users WHERE id = ?', [userId]);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password_hash);
+    if (!isMatch) {
+      return res.status(401).json({ error: 'Invalid old password' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const newPasswordHash = await bcrypt.hash(newPassword, salt);
+
+    run(`
+      UPDATE users
+      SET password_hash = ?, token_version = token_version + 1
+      WHERE id = ?
+    `, [newPasswordHash, userId]);
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update password' });
   }
 });
 
