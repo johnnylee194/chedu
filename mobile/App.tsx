@@ -1,8 +1,10 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode, useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, ScrollView, Pressable, SafeAreaView } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, Pressable, SafeAreaView, ActivityIndicator } from 'react-native';
 import MapScreen from './src/screens/MapScreen';
+import LoginScreen from './src/screens/LoginScreen';
 import { LocationProvider } from './src/context/LocationContext';
+import { getToken, removeToken, setOnLogoutCallback } from './src/services/authService';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -78,6 +80,48 @@ function MainApp() {
 }
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const token = await getToken();
+        if (token) {
+          setIsAuthenticated(true);
+        }
+      } catch (e) {
+        console.error('Auth check failed', e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkAuth();
+
+    // Subscribe to global 401 logouts
+    setOnLogoutCallback(async () => {
+      await removeToken();
+      setIsAuthenticated(false);
+    });
+  }, []);
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <ErrorBoundary>
+        <LoginScreen onLoginSuccess={() => setIsAuthenticated(true)} />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <LocationProvider>
@@ -90,6 +134,12 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#fff',
   },
   errorContainer: {

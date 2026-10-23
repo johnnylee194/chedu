@@ -1,4 +1,6 @@
 import { File, Directory, Paths } from 'expo-file-system';
+import { getToken, triggerLogout } from './authService';
+import { deleteMBTiles } from './offlinePackageManager';
 
 const DEFAULT_SERVER_URL = 'https://chedu.januslab.cn';
 
@@ -40,13 +42,35 @@ export const saveServerUrl = async (url: string): Promise<void> => {
   }
 };
 
-// 2. Fetching with Timeout
-const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 5000) => {
+// 2. Fetching with Timeout & Auth Interceptor
+export const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeout = 5000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
+
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal as any });
+    const token = await getToken();
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string> || {}),
+    };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal as any
+    });
+
     clearTimeout(id);
+
+    // Global 401 handler
+    if (response.status === 401) {
+      triggerLogout();
+      throw new Error('Unauthorized');
+    }
+
     return response;
   } catch (error) {
     clearTimeout(id);
@@ -92,7 +116,7 @@ const parseGeojson = (rawGeojson: any): any => {
   return rawGeojson;
 };
 
-// 3. Sync Logic
+// 3. Sync Logic with Diff Cleanup
 export const syncRoutes = async (): Promise<RouteDetail[]> => {
   const serverUrl = await getServerUrl();
   const routesUrl = `${serverUrl}/api/routes`;
@@ -106,6 +130,23 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
     // Ensure route directory exists
     if (!routesDir.exists) {
       routesDir.create();
+    }
+
+    // Process Diff and Cleanup
+    const remoteRouteIds = new Set(routesList.map(r => r.id));
+    const cachedRoutes = await getCachedRoutes();
+
+    for (const cachedRoute of cachedRoutes) {
+      if (!remoteRouteIds.has(cachedRoute.id)) {
+        console.log(`[Sync] Route ${cachedRoute.id} removed by Admin. Cleaning up local files...`);
+        // Delete MBTiles
+        await deleteMBTiles(cachedRoute.id);
+        // Delete local JSON cache
+        const cacheFile = new File(routesDir, `${cachedRoute.id}.json`);
+        if (cacheFile.exists) {
+          cacheFile.delete();
+        }
+      }
     }
 
     const fullRoutes: RouteDetail[] = [];
@@ -138,9 +179,16 @@ export const syncRoutes = async (): Promise<RouteDetail[]> => {
     }
 
     return fullRoutes;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Sync failed:', error);
-    throw error;
+    // If it's network error or timeout, let it fall through so callers can use cached routes
+    // Only 401 is fatal
+    if (error.message === 'Unauthorized') {
+      throw error;
+    }
+
+    // For non-auth errors, just return the cached routes to allow offline mode
+    return await getCachedRoutes();
   }
 };
 

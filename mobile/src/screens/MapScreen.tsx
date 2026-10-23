@@ -65,6 +65,11 @@ export default function MapScreen() {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [serverUrlInput, setServerUrlInput] = useState('');
 
+  // Password Change States
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [pwdMessage, setPwdMessage] = useState('');
+
   // Tracking & Metrics States
   const [isTracking, setIsTracking] = useState(false);
   const [cameraFollow, setCameraFollow] = useState(false);
@@ -158,6 +163,8 @@ export default function MapScreen() {
       // 2. Load settings
       const url = await getServerUrl();
       setServerUrlInput(url);
+      setOldPassword('');
+      setNewPassword('');
 
       // 3. Try syncing
       handleSync();
@@ -233,6 +240,35 @@ export default function MapScreen() {
     await saveServerUrl(serverUrlInput);
     setSettingsVisible(false);
     handleSync();
+  };
+
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword) {
+      setPwdMessage('请输入原密码和新密码');
+      return;
+    }
+    setPwdMessage('正在修改...');
+    try {
+      const serverUrl = await getServerUrl();
+      // Import getToken locally here to avoid top-level circular dependencies if any
+      const { getToken } = require('../services/authService');
+      const token = await getToken();
+
+      const response = await fetch(`${serverUrl}/api/auth/password`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ oldPassword, newPassword })
+      });
+      if (!response.ok) throw new Error('修改失败，请检查原密码');
+      setPwdMessage('密码修改成功！');
+      setOldPassword('');
+      setNewPassword('');
+    } catch (e: any) {
+      setPwdMessage(e.message || '网络请求失败');
+    }
   };
 
   const handleDownload = async (routeId: number) => {
@@ -505,18 +541,45 @@ export default function MapScreen() {
               autoCapitalize="none"
               keyboardType="url"
             />
+
+            <Text style={[styles.modalTitle, { marginTop: 10, fontSize: 16 }]}>修改密码</Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 10 }]}
+              placeholder="原密码"
+              secureTextEntry
+              value={oldPassword}
+              onChangeText={setOldPassword}
+            />
+            <TextInput
+              style={[styles.input, { marginBottom: 10 }]}
+              placeholder="新密码"
+              secureTextEntry
+              value={newPassword}
+              onChangeText={setNewPassword}
+            />
+            {pwdMessage ? <Text style={styles.pwdMessage}>{pwdMessage}</Text> : null}
+
             <View style={styles.modalButtons}>
               <Pressable
-                style={({ pressed }) => [styles.modalButton, styles.cancelButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [styles.modalButton, styles.changePwdButton, pressed && { opacity: 0.7 }]}
+                onPress={handleChangePassword}
+              >
+                <Text style={styles.buttonText}>修改密码</Text>
+              </Pressable>
+            </View>
+
+            <View style={[styles.modalButtons, { marginTop: 20 }]}>
+              <Pressable
+                style={({ pressed }) => [styles.modalButton, styles.cancelButton, pressed && { opacity: 0.7 }, { flex: 1 }]}
                 onPress={() => setSettingsVisible(false)}
               >
                 <Text style={styles.buttonText}>取消</Text>
               </Pressable>
               <Pressable
-                style={({ pressed }) => [styles.modalButton, pressed && { opacity: 0.7 }]}
+                style={({ pressed }) => [styles.modalButton, pressed && { opacity: 0.7 }, { flex: 1 }]}
                 onPress={saveSettings}
               >
-                <Text style={styles.buttonText}>保存</Text>
+                <Text style={styles.buttonText}>保存设置</Text>
               </Pressable>
             </View>
           </View>
@@ -787,5 +850,16 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  pwdMessage: {
+    color: '#ff3b30',
+    fontSize: 12,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  changePwdButton: {
+    backgroundColor: '#FF9500',
+    flex: 1,
   },
 });
