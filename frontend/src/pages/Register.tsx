@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import api from '../api/axios';
+import { userApi } from '../api/axios';
 
 export default function Register() {
   const [username, setUsername] = useState('');
@@ -15,7 +15,7 @@ export default function Register() {
     setLoading(true);
 
     try {
-      await api.post('/auth/register', { username, password });
+      await userApi.post('/auth/register', { username, password });
       alert('注册成功，请登录');
       navigate('/login');
     } catch (err: any) {

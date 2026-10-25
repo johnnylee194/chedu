@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../api/axios';
+import { adminApi as api } from '../api/axios';
 import RouteMap from '../components/RouteMap';
 import RouteList from '../components/RouteList';
 import { Upload, Download, Layers, AlertCircle } from 'lucide-react';
@@ -16,7 +16,7 @@ export default function AdminRouteManager() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
 
-  const token = useAuthStore(state => state.token);
+  const token = useAuthStore(state => state.adminToken);
 
   useEffect(() => {
     fetchRoutes();
