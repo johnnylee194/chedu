@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import api from '../api/axios';
+import { adminApi as api } from '../api/axios';
 import { KeyRound, Map, X, Plus } from 'lucide-react';
 
 export default function AdminUserManager() {

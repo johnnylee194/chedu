@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../api/axios';
+import { userApi as api } from '../api/axios';
 import { useAuthStore } from '../store/authStore';
 import RouteMap from '../components/RouteMap';
 import RouteList from '../components/RouteList';
@@ -14,9 +14,9 @@ export default function UserDashboard() {
   const [newPassword, setNewPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
 
-  const user = useAuthStore(state => state.user);
-  const token = useAuthStore(state => state.token);
-  const logout = useAuthStore(state => state.logout);
+  const user = useAuthStore(state => state.userData);
+  const token = useAuthStore(state => state.userToken);
+  const logout = useAuthStore(state => state.userLogout);
   const navigate = useNavigate();
 
   useEffect(() => {

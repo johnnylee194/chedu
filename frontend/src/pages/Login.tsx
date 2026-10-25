@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import api from '../api/axios';
+import { userApi } from '../api/axios';
 import { useAuthStore } from '../store/authStore';
 
 export default function Login() {
@@ -9,7 +9,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const login = useAuthStore(state => state.login);
+  const userLogin = useAuthStore(state => state.userLogin);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,14 +17,9 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await api.post('/auth/login', { username, password });
-      login(res.data.token, res.data.user);
-
-      if (res.data.user.role === 'admin') {
-        navigate('/admin/routes');
-      } else {
-        navigate('/');
-      }
+      const res = await userApi.post('/auth/login', { username, password });
+      userLogin(res.data.token, res.data.user);
+      navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.error || '登录失败');
     } finally {
