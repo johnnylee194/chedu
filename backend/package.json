@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "init-admin": "ts-node scripts/init-admin.ts"
+    "init-admin": "node scripts/init-admin.js"
   },
   "keywords": [
     "offroad",

@@ -13,7 +13,7 @@ interface RouteMapProps {
 export default function RouteMap({ selectedRoute, showBuffer, useOfflineTiles }: RouteMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const token = useAuthStore(state => state.token);
+  const token = useAuthStore(state => state.userToken) || useAuthStore(state => state.adminToken);
 
   useEffect(() => {
     if (!map.current && mapContainer.current) {

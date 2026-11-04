@@ -3,12 +3,12 @@ import { Database, Users, LogOut, Map } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 
 export default function AdminLayout() {
-  const logout = useAuthStore(state => state.logout);
+  const logout = useAuthStore(state => state.adminLogout);
   const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/admin/login');
   };
 
   return (

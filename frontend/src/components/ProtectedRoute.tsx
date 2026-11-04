@@ -6,16 +6,21 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ requireAdmin = false }: ProtectedRouteProps) {
-  const token = useAuthStore(state => state.token);
-  const user = useAuthStore(state => state.user);
+  const userToken = useAuthStore(state => state.userToken);
+  const userData = useAuthStore(state => state.userData);
 
-  if (!token || !user) {
-    return <Navigate to="/login" replace />;
+  const adminToken = useAuthStore(state => state.adminToken);
+  const adminData = useAuthStore(state => state.adminData);
+
+  if (requireAdmin) {
+    if (!adminToken || !adminData || adminData.role !== 'admin') {
+      return <Navigate to="/admin/login" replace />;
+    }
+    return <Outlet />;
+  } else {
+    if (!userToken || !userData) {
+      return <Navigate to="/login" replace />;
+    }
+    return <Outlet />;
   }
-
-  if (requireAdmin && user.role !== 'admin') {
-    return <Navigate to="/" replace />;
-  }
-
-  return <Outlet />;
 }
