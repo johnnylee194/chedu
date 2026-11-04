@@ -1,11 +1,13 @@
-import dotenv from 'dotenv';
-import bcrypt from 'bcrypt';
-import { initDatabase, run, queryOne } from '../src/database';
-import fs from 'fs';
-import path from 'path';
+const dotenv = require('dotenv');
+const bcrypt = require('bcrypt');
+const fs = require('fs');
+const path = require('path');
 
-// Load .env variables
-const envPath = path.resolve(__dirname, '../../.env');
+// 指向 Docker 容器中编译好的产物
+const { initDatabase, run, queryOne } = require('../dist/database');
+
+// 兼容容器内 (/app/.env) 与宿主机本地运行的路径
+const envPath = path.resolve(__dirname, '../.env');
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 } else {

@@ -13,6 +13,6 @@ ADMIN_PASS=$2
 echo "正在通过 Docker 容器创建管理员账号: $ADMIN_USER ..."
 
 # 将环境变量传递给容器，并调用后端的 init-admin 脚本
-docker compose exec -e INIT_ADMIN_USER="$ADMIN_USER" -e INIT_ADMIN_PASS="$ADMIN_PASS" chedu npm run init-admin
+docker compose exec -e INIT_ADMIN_USER="$ADMIN_USER" -e INIT_ADMIN_PASS="$ADMIN_PASS" app npm run init-admin
 
 echo "执行完毕。"
