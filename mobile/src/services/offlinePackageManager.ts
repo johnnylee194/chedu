@@ -2,7 +2,6 @@
 import { createDownloadResumable } from 'expo-file-system/legacy';
 import * as FileSystem from 'expo-file-system/legacy';
 import { File, Directory, Paths } from 'expo-file-system';
-import { getToken } from './authService';
 
 const getMBTilesDir = (): Directory => {
   return new Directory(Paths.document, 'mbtiles');
@@ -45,14 +44,7 @@ export const downloadMBTiles = async (
   onProgress: (progress: number) => void
 ): Promise<boolean> => {
   await initOfflineManager();
-  let downloadUrl = `${serverUrl}/api/routes/${routeId}/mbtiles`;
-
-  const token = await getToken();
-  if (token) {
-    // Append token query param for download authorization
-    downloadUrl += `?token=${token}`;
-  }
-
+  const downloadUrl = `${serverUrl}/api/routes/${routeId}/mbtiles`;
   const file = new File(getMBTilesDir(), `route_${routeId}.mbtiles`);
 
   try {

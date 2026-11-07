@@ -14,6 +14,52 @@ const upload = multer({
     limits: { fileSize: 100 * 1024 * 1024 }
 });
 
+const imageStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    const random = Math.random().toString(36).substring(2, 8);
+    cb(null, `img_${Date.now()}_${random}${ext}`);
+  }
+});
+
+const uploadImages = multer({
+  storage: imageStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .jpg, .jpeg, .png, and .webp image files are allowed'));
+    }
+  }
+});
+
+router.post('/images', uploadImages.array('images', 20), (req: Request, res: Response) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: 'No image files uploaded' });
+    }
+
+    const uploaded = files.map(file => ({
+      image_url: `/uploads/${file.filename}`,
+      caption: ''
+    }));
+
+    res.json({
+      message: 'Images uploaded successfully',
+      images: uploaded
+    });
+  } catch (error: any) {
+    console.error('[Upload Images] Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to upload images' });
+  }
+});
+
 router.post('/kml', upload.single('file'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {

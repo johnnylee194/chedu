@@ -11,7 +11,6 @@ services:
       - ./data:/app/data
       - ./uploads:/app/uploads
       - ./backend/.env:/app/.env
-      - ./scripts:/app/scripts
     environment:
       - NODE_ENV=production
       - APP_ENV=production

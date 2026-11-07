@@ -1,18 +1,32 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, Pressable, FlatList, Modal, TextInput, ActivityIndicator, SafeAreaView, Vibration } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  SafeAreaView,
+  Vibration,
+  ScrollView,
+} from 'react-native';
 import * as MapLibreGLNamespace from '@maplibre/maplibre-react-native';
-import { syncRoutes, getCachedRoutes, RouteDetail, getServerUrl, saveServerUrl } from '../services/syncService';
-import { isMBTilesDownloaded, downloadMBTiles, deleteMBTiles, getMBTilesUri } from '../services/offlinePackageManager';
+import { RouteDetail } from '../services/syncService';
+import { getMBTilesUri } from '../services/offlinePackageManager';
 import UserLocationLayer from '../components/UserLocationLayer';
-import LocationHUD from '../components/LocationHUD';
+import LocationHUD, { HUDCoordsOverride } from '../components/LocationHUD';
 import { useLocation } from '../context/LocationContext';
-import { calculateRouteMetrics } from '../utils/geoMath';
+import {
+  calculateRouteMetrics,
+  extractRouteMeta,
+  generateRadarGridGeoJSON,
+  RouteWaypoint,
+} from '../utils/geoMath';
 
 const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
 const MapView = MapLibreGL.MapView ?? (MapLibreGLNamespace as any).MapView;
 const Camera = MapLibreGL.Camera ?? (MapLibreGLNamespace as any).Camera;
 const ShapeSource = MapLibreGL.ShapeSource ?? (MapLibreGLNamespace as any).ShapeSource;
 const LineLayer = MapLibreGL.LineLayer ?? (MapLibreGLNamespace as any).LineLayer;
+const CircleLayer = MapLibreGL.CircleLayer ?? (MapLibreGLNamespace as any).CircleLayer;
 
 try {
   if (MapLibreGL.setAccessToken) {
@@ -24,72 +38,160 @@ try {
   console.error('Failed to set MapLibre access token:', e);
 }
 
-MapLibreGL.Logger.setLogCallback((log: any) => {
-  if (log.level === 'error' || log.level === 'warning') {
-    console.error(`[MapLibre Native] ${log.message}`);
-  }
-  return true;
-});
-MapLibreGL.Logger.setLogLevel('Verbose');
-
-const mapStyle = JSON.stringify({
+// Pure offline tactical radar style — ZERO online tile requests
+const TACTICAL_RADAR_STYLE = JSON.stringify({
   version: 8,
-  sources: {
-    esri: {
-      type: 'raster',
-      tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-      ],
-      tileSize: 256,
-      maxzoom: 18,
-    },
-  },
+  sources: {},
   layers: [
     {
-      id: 'esri-layer',
-      type: 'raster',
-      source: 'esri',
-      minzoom: 0,
-      maxzoom: 22,
+      id: 'tactical-radar-bg',
+      type: 'background',
+      paint: {
+        'background-color': '#080C12',
+      },
     },
   ],
 });
 
 const MAP_IMAGES = { 'arrow-up': require('../../assets/nav_arrow.png') };
 
-export default function MapScreen() {
-  const [routes, setRoutes] = useState<RouteDetail[]>([]);
-  const [selectedRoute, setSelectedRoute] = useState<RouteDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string>('');
-  const [settingsVisible, setSettingsVisible] = useState(false);
-  const [serverUrlInput, setServerUrlInput] = useState('');
+interface MapScreenProps {
+  route: RouteDetail;
+  hasLocalMBTiles: boolean;
+  onBack: () => void;
+}
 
-  // Password Change States
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [pwdMessage, setPwdMessage] = useState('');
+export default function MapScreen({ route, hasLocalMBTiles, onBack }: MapScreenProps) {
+  const { coords: realCoords, heading: realHeading } = useLocation();
 
-  // Tracking & Metrics States
-  const [isTracking, setIsTracking] = useState(false);
-  const [cameraFollow, setCameraFollow] = useState(false);
-  const { coords } = useLocation();
+  // Automatically light up offline satellite package when available
+  const [satelliteLit, setSatelliteLit] = useState<boolean>(hasLocalMBTiles);
+  const [isTracking, setIsTracking] = useState<boolean>(false);
+  const [cameraFollow, setCameraFollow] = useState<boolean>(false);
+  const [courseUp3D, setCourseUp3D] = useState<boolean>(false);
+  const [selectedWaypoint, setSelectedWaypoint] = useState<RouteWaypoint | null>(null);
+  const [mapReady, setMapReady] = useState<boolean>(false);
 
-  // Offline Map States
-  const [offlineMapMode, setOfflineMapMode] = useState(false);
-  const [downloadedRoutes, setDownloadedRoutes] = useState<Set<number>>(new Set());
-  const [downloadingRoutes, setDownloadingRoutes] = useState<Record<number, number>>({}); // routeId -> progress (0-1)
+  // Indoor / Live Demo Route Simulation State
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [simOffRoute, setSimOffRoute] = useState<boolean>(false);
+  const [simStepIdx, setSimStepIdx] = useState<number>(0);
 
   const cameraRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
 
+  useEffect(() => {
+    setSatelliteLit(hasLocalMBTiles);
+    setSimStepIdx(0);
+    setSimOffRoute(false);
+  }, [hasLocalMBTiles, route.id]);
+
+  // Extract flat route coordinate sequence for simulation
+  const trackPoints = useMemo(() => {
+    const pts: number[][] = [];
+    const features = route?.geojson?.features || [];
+    for (const f of features) {
+      const g = f?.geometry;
+      if (!g) continue;
+      if (g.type === 'LineString' && Array.isArray(g.coordinates)) {
+        for (const c of g.coordinates) {
+          if (Array.isArray(c) && c.length >= 2) pts.push(c);
+        }
+      } else if (g.type === 'MultiLineString' && Array.isArray(g.coordinates)) {
+        for (const line of g.coordinates) {
+          if (Array.isArray(line)) {
+            for (const c of line) {
+              if (Array.isArray(c) && c.length >= 2) pts.push(c);
+            }
+          }
+        }
+      }
+    }
+    return pts;
+  }, [route.geojson]);
+
+  useEffect(() => {
+    if (!isTracking || !isSimulating || trackPoints.length < 2) return;
+    const timer = setInterval(() => {
+      setSimStepIdx((prev) => (prev + 1) % trackPoints.length);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isTracking, isSimulating, trackPoints.length]);
+
+  const simData = useMemo((): { coords: HUDCoordsOverride; heading: number } | null => {
+    if (!isSimulating || trackPoints.length === 0) return null;
+    const idx = simStepIdx % trackPoints.length;
+    const nextIdx = (idx + 1) % trackPoints.length;
+    const pt = trackPoints[idx];
+    const nextPt = trackPoints[nextIdx];
+
+    // Calculate bearing from pt to nextPt
+    const dLon = ((nextPt[0] - pt[0]) * Math.PI) / 180;
+    const lat1 = (pt[1] * Math.PI) / 180;
+    const lat2 = (nextPt[1] * Math.PI) / 180;
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x =
+      Math.cos(lat1) * Math.sin(lat2) -
+      Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    const brng = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+
+    // When simOffRoute is toggled on, offset latitude by ~0.00078 deg (~86 meters)
+    const offsetLat = simOffRoute ? 0.00078 : 0;
+    const offsetLng = simOffRoute ? 0.00035 : 0;
+
+    return {
+      coords: {
+        longitude: pt[0] + offsetLng,
+        latitude: pt[1] + offsetLat,
+        altitude: pt.length >= 3 && Number.isFinite(pt[2]) ? pt[2] : 3250,
+        accuracy: 3,
+        speed: 12.8, // ~46.1 km/h
+        heading: brng,
+      },
+      heading: brng,
+    };
+  }, [isSimulating, trackPoints, simStepIdx, simOffRoute]);
+
+  const coords = simData ? simData.coords : realCoords;
+  const heading = simData ? simData.heading : realHeading;
+
+  // Extract waypoints, elevation, and tactical grid
+  const routeMeta = useMemo(() => extractRouteMeta(route.geojson), [route.geojson]);
+  const radarGridGeoJSON = useMemo(() => generateRadarGridGeoJSON(route.bbox), [route.bbox]);
+
+  // Build GeoJSON for start/end/waypoints markers on map
+  const waypointsGeoJSON = useMemo(() => {
+    return {
+      type: 'FeatureCollection',
+      features: routeMeta.waypoints.map((wp) => ({
+        type: 'Feature',
+        id: wp.id,
+        properties: {
+          id: wp.id,
+          name: wp.name,
+          kind: wp.kind,
+          elevation: wp.elevation,
+          description: wp.description || '',
+        },
+        geometry: {
+          type: 'Point',
+          coordinates: wp.coord,
+        },
+      })),
+    };
+  }, [routeMeta.waypoints]);
+
+  // Live route tracking metrics
   const metrics = useMemo(() => {
-    if (!isTracking || !selectedRoute?.geojson || !coords) return null;
-    return calculateRouteMetrics([coords.longitude, coords.latitude], selectedRoute.geojson);
-  }, [isTracking, selectedRoute, coords]);
+    if (!isTracking || !route?.geojson || !coords) return null;
+    return calculateRouteMetrics([coords.longitude, coords.latitude], route.geojson);
+  }, [isTracking, route, coords]);
 
   const deviation = metrics ? Math.round(metrics.distance) : null;
   const snappedCoord = metrics ? metrics.snappedCoord : null;
+  const remainingDistanceKm = metrics ? metrics.remainingDistanceKm : null;
+  const progressPercent = metrics ? metrics.progressPercent : null;
+
   const prevDeviationRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -104,6 +206,7 @@ export default function MapScreen() {
     }
   }, [deviation, isTracking]);
 
+  // Deviation warning guide line
   const deviationLineGeoJSON = useMemo(() => {
     if (isTracking && deviation !== null && deviation >= 60 && coords && snappedCoord) {
       return {
@@ -126,185 +229,97 @@ export default function MapScreen() {
     return null;
   }, [isTracking, deviation, coords, snappedCoord]);
 
+  // Center route on initial map load
   useEffect(() => {
-    if (offlineMapMode && selectedRoute) {
-      console.log(`[Offline Source] Mounting MBTiles: ${getMBTilesUri(selectedRoute.id)}`);
+    if (mapReady && route.bbox && cameraRef.current) {
+      const [minLng, minLat, maxLng, maxLat] = route.bbox;
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], 60, 700);
     }
-  }, [offlineMapMode, selectedRoute]);
+  }, [mapReady, route.id]);
 
-  useEffect(() => {
-    if (isTracking) {
-      setCameraFollow(true);
-    } else {
-      setCameraFollow(false);
-    }
-  }, [isTracking]);
-
+  // Camera follow during active tracking
   useEffect(() => {
     if (cameraFollow && coords && cameraRef.current) {
+      const activeHeading =
+        courseUp3D && heading !== null && heading >= 0 ? heading : 0;
       cameraRef.current.setCamera({
         centerCoordinate: [coords.longitude, coords.latitude],
         zoomLevel: 15,
+        heading: activeHeading,
+        pitch: courseUp3D ? 45 : 0,
         animationDuration: 500,
       });
     }
-  }, [coords, cameraFollow]);
+  }, [coords, cameraFollow, courseUp3D, heading]);
 
-  useEffect(() => {
-    // Offline-first startup flow
-    const init = async () => {
-      // 1. Read cached routes
-      const cached = await getCachedRoutes();
-      setRoutes(cached);
-      if (cached.length > 0) {
-        handleRouteSelect(cached[0]);
-      }
-
-      // 2. Load settings
-      const url = await getServerUrl();
-      setServerUrlInput(url);
-      setOldPassword('');
-      setNewPassword('');
-
-      // 3. Try syncing
-      handleSync();
-    };
-
-    init();
-  }, []);
-
-  // Update downloaded routes status when routes change
-  useEffect(() => {
-    const checkDownloadedRoutes = async () => {
-      const downloaded = new Set<number>();
-      for (const route of routes) {
-        if (route.tile_status === 'completed') {
-          const isDownloaded = await isMBTilesDownloaded(route.id);
-          if (isDownloaded) {
-            downloaded.add(route.id);
-          }
-        }
-      }
-      setDownloadedRoutes(downloaded);
-    };
-
-    if (routes.length > 0) {
-      checkDownloadedRoutes();
-    }
-  }, [routes]);
-
-  const handleSync = async () => {
-    if (loading) return;
-    setLoading(true);
-    setSyncStatus('同步中...');
-    try {
-      const synced = await syncRoutes();
-      setRoutes(synced);
-      setSyncStatus('同步成功。');
-      if (!selectedRoute && synced.length > 0) {
-        handleRouteSelect(synced[0]);
-      }
-    } catch (e) {
-      setSyncStatus('离线或同步失败，使用缓存路线。');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRouteSelect = (route: RouteDetail) => {
-    setSelectedRoute(route);
+  const handleFitRoute = () => {
+    setCameraFollow(false);
+    setSelectedWaypoint(null);
     if (route.bbox && cameraRef.current) {
       const [minLng, minLat, maxLng, maxLat] = route.bbox;
-      cameraRef.current.fitBounds(
-        [maxLng, maxLat],
-        [minLng, minLat],
-        50, // padding
-        1000 // duration
-      );
+      cameraRef.current.fitBounds([maxLng, maxLat], [minLng, minLat], 60, 800);
     }
   };
 
-  const handleCenterRoute = () => {
-    if (selectedRoute?.bbox && cameraRef.current) {
-      const [minLng, minLat, maxLng, maxLat] = selectedRoute.bbox;
-      cameraRef.current.fitBounds(
-        [maxLng, maxLat],
-        [minLng, minLat],
-        50,
-        1000
-      );
-    }
-  };
-
-  const saveSettings = async () => {
-    await saveServerUrl(serverUrlInput);
-    setSettingsVisible(false);
-    handleSync();
-  };
-
-  const handleChangePassword = async () => {
-    if (!oldPassword || !newPassword) {
-      setPwdMessage('请输入原密码和新密码');
-      return;
-    }
-    setPwdMessage('正在修改...');
-    try {
-      const serverUrl = await getServerUrl();
-      // Import getToken locally here to avoid top-level circular dependencies if any
-      const { getToken } = require('../services/authService');
-      const token = await getToken();
-
-      const response = await fetch(`${serverUrl}/api/auth/password`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ oldPassword, newPassword })
+  const handleLocateMe = () => {
+    if (coords && cameraRef.current) {
+      setCameraFollow(true);
+      cameraRef.current.setCamera({
+        centerCoordinate: [coords.longitude, coords.latitude],
+        zoomLevel: 15,
+        animationDuration: 600,
       });
-      if (!response.ok) throw new Error('修改失败，请检查原密码');
-      setPwdMessage('密码修改成功！');
-      setOldPassword('');
-      setNewPassword('');
-    } catch (e: any) {
-      setPwdMessage(e.message || '网络请求失败');
     }
   };
 
-  const handleDownload = async (routeId: number) => {
-    if (downloadingRoutes[routeId] !== undefined) return;
-
-    setDownloadingRoutes(prev => ({ ...prev, [routeId]: 0 }));
-    const serverUrl = await getServerUrl();
-
-    const success = await downloadMBTiles(serverUrl, routeId, (progress) => {
-      setDownloadingRoutes(prev => ({ ...prev, [routeId]: progress }));
-    });
-
-    setDownloadingRoutes(prev => {
-      const next = { ...prev };
-      delete next[routeId];
-      return next;
-    });
-
-    if (success) {
-      setDownloadedRoutes(prev => new Set(prev).add(routeId));
-    }
-  };
-
-  const handleDelete = async (routeId: number) => {
-    const success = await deleteMBTiles(routeId);
-    if (success) {
-      setDownloadedRoutes(prev => {
-        const next = new Set(prev);
-        next.delete(routeId);
-        return next;
+  const handleToggleOrientation = () => {
+    const next3D = !courseUp3D;
+    setCourseUp3D(next3D);
+    if (cameraRef.current) {
+      cameraRef.current.setCamera({
+        heading: next3D && heading ? heading : 0,
+        pitch: next3D ? 45 : 0,
+        animationDuration: 400,
       });
-      if (selectedRoute?.id === routeId && offlineMapMode) {
-        setOfflineMapMode(false);
+    }
+  };
+
+  const handleFocusWaypoint = (wp: RouteWaypoint) => {
+    setCameraFollow(false);
+    setSelectedWaypoint(wp);
+    if (cameraRef.current) {
+      cameraRef.current.setCamera({
+        centerCoordinate: wp.coord,
+        zoomLevel: 14.5,
+        animationDuration: 600,
+      });
+    }
+  };
+
+  const handleToggleTracking = () => {
+    const next = !isTracking;
+    setIsTracking(next);
+    setCameraFollow(next);
+    setSelectedWaypoint(null);
+    if (next) {
+      // Auto-enable simulation if indoor/far from route (>2km) or no real GPS
+      if (!realCoords) {
+        setIsSimulating(true);
+      } else {
+        const m = calculateRouteMetrics(
+          [realCoords.longitude, realCoords.latitude],
+          route.geojson
+        );
+        if (!m || m.distance > 2000) {
+          setIsSimulating(true);
+        }
       }
+    } else {
+      setSimOffRoute(false);
     }
   };
+
+  const totalAscent = route.total_ascent || routeMeta.computedAscent || 0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -312,61 +327,77 @@ export default function MapScreen() {
         <MapView
           ref={mapRef}
           style={styles.map}
-          mapStyle={mapStyle}
+          mapStyle={TACTICAL_RADAR_STYLE}
           logoEnabled={false}
           attributionEnabled={false}
+          compassEnabled={false}
           onRegionWillChange={(e: any) => {
-            if (e.properties.isUserInteraction) {
+            if (e?.properties?.isUserInteraction) {
               setCameraFollow(false);
             }
           }}
-          onRegionDidChange={async (e: any) => {
-            console.log(`[Map View] Current Zoom: ${e.properties.zoomLevel.toFixed(2)}`);
-            try {
-              if (mapRef.current) {
-                const style = await mapRef.current.getStyle();
-                if (style && style.layers) {
-                  const layerIds = style.layers.map((l: any) => l.id);
-                  const offlineIdx = layerIds.indexOf('offline-mbtiles-layer');
-                  const routeIdx = layerIds.indexOf('routeLayer');
-                  console.log(`[Map Layers] offline-mbtiles-layer Index: ${offlineIdx}, routeLayer Index: ${routeIdx}`);
-                }
-              }
-            } catch (err) {
-              console.log('[Map Layers] Failed to get style');
-            }
-          }}
-          onDidFailLoadingMap={(e: any) => console.error('[Map View] Failed to load map:', e)}
-          onDidFinishLoadingMap={() => console.log('[Map View] Map loaded successfully')}
+          onDidFinishLoadingMap={() => setMapReady(true)}
         >
           <Camera ref={cameraRef} />
 
           <MapLibreGL.Images images={MAP_IMAGES} />
 
-          {/* Offline MBTiles Raster Layer */}
-          {offlineMapMode && selectedRoute && downloadedRoutes.has(selectedRoute.id) && (
+          {/* 1. Tactical Radar Coordinate Grid (Pure Local GeoJSON) */}
+          <ShapeSource id="radarGridSource" shape={radarGridGeoJSON as any}>
+            <LineLayer
+              id="radarGridMinorLayer"
+              filter={['==', ['get', 'gridType'], 'minor']}
+              style={{
+                lineColor: '#111A27',
+                lineWidth: 1,
+                lineDasharray: [2, 3],
+              }}
+            />
+            <LineLayer
+              id="radarGridMajorLayer"
+              filter={['==', ['get', 'gridType'], 'major']}
+              style={{
+                lineColor: '#1E2D42',
+                lineWidth: 1.2,
+              }}
+            />
+          </ShapeSource>
+
+          {/* 2. Offline MBTiles Satellite Layer (Localized Illumination) */}
+          {satelliteLit && hasLocalMBTiles && (
             <MapLibreGL.RasterSource
               id="offline-mbtiles"
-              url={getMBTilesUri(selectedRoute.id)}
+              url={getMBTilesUri(route.id)}
               tileSize={256}
               minZoomLevel={8}
-              maxZoomLevel={16}
+              maxZoomLevel={route.max_zoom || 15}
             >
               <MapLibreGL.RasterLayer
                 id="offline-mbtiles-layer"
-                style={{ rasterOpacity: 1 }}
-		belowLayerID="routeLayer"
+                belowLayerID="routeGlowLayer"
+                style={{ rasterOpacity: 0.95 }}
               />
             </MapLibreGL.RasterSource>
           )}
 
-          {/* Route Polyline */}
-          {selectedRoute?.geojson && (
-            <ShapeSource id="routeSource" shape={selectedRoute.geojson} maxZoomLevel={22}>
+          {/* 3. Dual-Layer Glowing Route Track */}
+          {route?.geojson && (
+            <ShapeSource id="routeSource" shape={route.geojson} maxZoomLevel={22}>
               <LineLayer
-                id="routeLayer"
+                id="routeGlowLayer"
                 style={{
                   lineColor: '#FF5722',
+                  lineWidth: 10,
+                  lineOpacity: 0.28,
+                  lineJoin: 'round',
+                  lineCap: 'round',
+                }}
+              />
+              <LineLayer
+                id="routeLayer"
+                aboveLayerID="routeGlowLayer"
+                style={{
+                  lineColor: '#FF6B35',
                   lineWidth: 4,
                   lineJoin: 'round',
                   lineCap: 'round',
@@ -375,15 +406,51 @@ export default function MapScreen() {
             </ShapeSource>
           )}
 
-          {/* Deviation Warning Polyline */}
+          {/* 4. Start / End / Waypoint Tactical Markers */}
+          {waypointsGeoJSON.features.length > 0 && (
+            <ShapeSource
+              id="waypointsSource"
+              shape={waypointsGeoJSON as any}
+              onPress={(e: any) => {
+                const feat = e?.features?.[0];
+                if (feat?.properties?.id) {
+                  const found = routeMeta.waypoints.find(
+                    (w) => w.id === feat.properties.id
+                  );
+                  if (found) setSelectedWaypoint(found);
+                }
+              }}
+            >
+              <CircleLayer
+                id="waypointsCircleLayer"
+                aboveLayerID="routeLayer"
+                style={{
+                  circleRadius: 7,
+                  circleColor: [
+                    'match',
+                    ['get', 'kind'],
+                    'start',
+                    '#10B981',
+                    'end',
+                    '#EF4444',
+                    '#F59E0B',
+                  ],
+                  circleStrokeColor: '#080C12',
+                  circleStrokeWidth: 2.5,
+                }}
+              />
+            </ShapeSource>
+          )}
+
+          {/* 5. Deviation Warning Dashed Line */}
           {deviationLineGeoJSON && (
             <ShapeSource id="deviationSource" shape={deviationLineGeoJSON as any}>
               <LineLayer
                 id="deviationLayer"
                 aboveLayerID="routeLayer"
                 style={{
-                  lineColor: '#FFD60A',
-                  lineWidth: 3,
+                  lineColor: '#FACC15',
+                  lineWidth: 3.5,
                   lineDasharray: [2, 2],
                   lineJoin: 'round',
                   lineCap: 'round',
@@ -392,199 +459,216 @@ export default function MapScreen() {
             </ShapeSource>
           )}
 
-          {/* Real-time Vehicle Marker */}
-          <UserLocationLayer />
+          {/* 6. Real-Time Vehicle Location Marker */}
+          <UserLocationLayer
+            overrideCoords={simData ? simData.coords : undefined}
+            overrideHeading={simData ? simData.heading : undefined}
+          />
         </MapView>
 
-        <Pressable
-          style={({ pressed }) => [styles.settingsButton, pressed && { opacity: 0.7 }]}
-          onPress={() => setSettingsVisible(true)}
-        >
-          <Text style={styles.settingsButtonText}>⚙️ 设置</Text>
-        </Pressable>
-
-        {/* Exit Tracking Button */}
-        {isTracking && (
+        {/* ================================================================
+            TOP TACTICAL HEADER BAR
+           ================================================================ */}
+        <View style={styles.topHeaderBar}>
           <Pressable
-            style={styles.exitTrackingButton}
+            style={({ pressed }) => [styles.topBackBtn, pressed && { opacity: 0.8 }]}
+            onPress={onBack}
+          >
+            <Text style={styles.topBackBtnText}>← 工具箱</Text>
+          </Pressable>
+
+          <View style={styles.topRouteTitleBox}>
+            <Text style={styles.topRouteCodeText}>RADAR · #{route.redeem_code}</Text>
+            <Text style={styles.topRouteTitleText} numberOfLines={1}>
+              {route.title}
+            </Text>
+          </View>
+
+          {/* Satellite / Radar Grid Toggle */}
+          <Pressable
+            style={[
+              styles.layerToggleBtn,
+              satelliteLit && hasLocalMBTiles && styles.layerToggleBtnActive,
+              !hasLocalMBTiles && { opacity: 0.5 },
+            ]}
             onPress={() => {
-              setIsTracking(false);
-              setCameraFollow(false);
+              if (hasLocalMBTiles) {
+                setSatelliteLit(!satelliteLit);
+              }
             }}
           >
-            <Text style={styles.exitTrackingButtonText}>⏹️ 退出循迹</Text>
+            <View
+              style={[
+                styles.layerToggleDot,
+                {
+                  backgroundColor:
+                    satelliteLit && hasLocalMBTiles ? '#10B981' : '#38BDF8',
+                },
+              ]}
+            />
+            <Text style={styles.layerToggleText}>
+              {!hasLocalMBTiles
+                ? '纯网格'
+                : satelliteLit
+                ? '卫星点亮'
+                : '雷达网格'}
+            </Text>
           </Pressable>
+        </View>
+
+        {/* ================================================================
+            WAYPOINT QUICK-JUMP STRIP & POPUP INSPECTOR
+           ================================================================ */}
+        {!isTracking && routeMeta.waypoints.length > 0 && (
+          <View style={styles.waypointStripWrapper}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.waypointStripScroll}
+            >
+              {routeMeta.waypoints.map((wp, idx) => {
+                const isSelected = selectedWaypoint?.id === wp.id;
+                return (
+                  <Pressable
+                    key={wp.id}
+                    style={[
+                      styles.waypointPill,
+                      isSelected && styles.waypointPillActive,
+                    ]}
+                    onPress={() => handleFocusWaypoint(wp)}
+                  >
+                    <View
+                      style={[
+                        styles.waypointPillDot,
+                        wp.kind === 'start' && { backgroundColor: '#10B981' },
+                        wp.kind === 'end' && { backgroundColor: '#EF4444' },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.waypointPillText,
+                        isSelected && styles.waypointPillTextActive,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {wp.kind === 'start'
+                        ? '起点'
+                        : wp.kind === 'end'
+                        ? '终点'
+                        : `航点${idx}: ${wp.name}`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
         )}
 
-        {/* Resume Follow Button */}
+        {/* Selected Waypoint Inspector Card */}
+        {selectedWaypoint && (
+          <View style={styles.waypointPopupCard}>
+            <View style={styles.waypointPopupHeader}>
+              <Text style={styles.waypointPopupTitle}>{selectedWaypoint.name}</Text>
+              <Pressable onPress={() => setSelectedWaypoint(null)}>
+                <Text style={styles.waypointPopupClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.waypointPopupCoords}>
+              坐标: {selectedWaypoint.coord[1].toFixed(5)}°N,{' '}
+              {selectedWaypoint.coord[0].toFixed(5)}°E
+              {selectedWaypoint.elevation !== undefined
+                ? ` · 海拔 ${selectedWaypoint.elevation}m`
+                : ''}
+            </Text>
+            {!!selectedWaypoint.description && (
+              <Text style={styles.waypointPopupDesc}>
+                {selectedWaypoint.description}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* ================================================================
+            RIGHT FLOATING TACTICAL CONTROLS
+           ================================================================ */}
+        <View style={styles.rightControlsPod}>
+          <Pressable
+            style={({ pressed }) => [styles.tacticalCtrlBtn, pressed && { opacity: 0.8 }]}
+            onPress={handleFitRoute}
+          >
+            <Text style={styles.tacticalCtrlIcon}>[ ]</Text>
+            <Text style={styles.tacticalCtrlLabel}>全览</Text>
+          </Pressable>
+
+          <View style={styles.ctrlDivider} />
+
+          <Pressable
+            style={({ pressed }) => [styles.tacticalCtrlBtn, pressed && { opacity: 0.8 }]}
+            onPress={handleLocateMe}
+          >
+            <Text style={styles.tacticalCtrlIcon}>◎</Text>
+            <Text style={styles.tacticalCtrlLabel}>定位</Text>
+          </Pressable>
+
+          <View style={styles.ctrlDivider} />
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.tacticalCtrlBtn,
+              courseUp3D && styles.tacticalCtrlBtnActive,
+              pressed && { opacity: 0.8 },
+            ]}
+            onPress={handleToggleOrientation}
+          >
+            <Text
+              style={[
+                styles.tacticalCtrlIcon,
+                courseUp3D && { color: '#FF5722' },
+              ]}
+            >
+              {courseUp3D ? '3D' : 'N▲'}
+            </Text>
+            <Text style={styles.tacticalCtrlLabel}>
+              {courseUp3D ? '车头' : '正北'}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Resume Camera Follow Pill during Tracking */}
         {isTracking && !cameraFollow && (
           <Pressable
-            style={styles.resumeFollowButton}
+            style={styles.resumeFollowPill}
             onPress={() => setCameraFollow(true)}
           >
-            <Text style={styles.resumeFollowButtonText}>📍 恢复跟随</Text>
+            <Text style={styles.resumeFollowPillText}>◎ 恢复视角跟随</Text>
           </Pressable>
         )}
 
-        {/* Off-Road Driving HUD */}
-        <LocationHUD isTracking={isTracking} deviation={deviation} />
-      </View>
-
-      {/* Bottom Drawer UI */}
-      <View style={[styles.drawer, isTracking && styles.drawerCollapsed]}>
-        <View style={styles.drawerHeader}>
-          <Text style={styles.drawerTitle}>路线列表</Text>
-          <View style={styles.syncContainer}>
-            <Text style={styles.syncStatus}>{syncStatus}</Text>
-            <Pressable
-              style={({ pressed }) => [styles.syncButton, pressed && { opacity: 0.7 }]}
-              onPress={handleSync}
-              disabled={loading}
-            >
-              {loading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.syncButtonText}>同步</Text>}
-            </Pressable>
-          </View>
-        </View>
-
-        <FlatList
-          data={routes}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => {
-            const isDownloaded = downloadedRoutes.has(item.id);
-            const isDownloading = downloadingRoutes[item.id] !== undefined;
-            const progress = downloadingRoutes[item.id] || 0;
-
-            return (
-              <Pressable
-                style={({ pressed }) => [
-                  styles.routeItem,
-                  selectedRoute?.id === item.id && styles.selectedRouteItem,
-                  pressed && { opacity: 0.7 }
-                ]}
-                onPress={() => handleRouteSelect(item)}
-              >
-                <View style={styles.routeInfo}>
-                  <Text style={styles.routeName}>{item.title || '未命名路线'}</Text>
-                  <Text style={styles.routeDetails}>
-                    {item.total_distance !== undefined && item.total_distance !== null ? Number(item.total_distance).toFixed(1) + ' km' : '0.0 km'}
-                  </Text>
-                  {selectedRoute?.id === item.id && (
-                     <View style={styles.selectedRouteActions}>
-                       <Pressable
-                         style={styles.centerRouteButton}
-                         onPress={handleCenterRoute}
-                       >
-                         <Text style={styles.centerRouteButtonText}>🎯 居中路线</Text>
-                       </Pressable>
-                       {isDownloaded && (
-                         <Pressable
-                           style={styles.offlineToggle}
-                           onPress={() => setOfflineMapMode(!offlineMapMode)}
-                         >
-                           <Text style={styles.offlineToggleText}>
-                             {offlineMapMode ? '✅ 离线地图' : '🔄 离线地图'}
-                           </Text>
-                         </Pressable>
-                       )}
-                       <Pressable
-                         style={[styles.trackingToggle, isTracking && styles.trackingToggleActive]}
-                         onPress={() => setIsTracking(!isTracking)}
-                       >
-                         <Text style={[styles.trackingToggleText, isTracking && styles.trackingToggleTextActive]}>
-                           {isTracking ? '⏹️ 结束' : '🚀 开始循迹'}
-                         </Text>
-                       </Pressable>
-                     </View>
-                  )}
-                </View>
-
-                {item.tile_status === 'completed' && (
-                  <View style={styles.downloadSection}>
-                    {isDownloaded ? (
-                      <Pressable
-                        style={[styles.downloadButton, styles.deleteButton]}
-                        onPress={() => handleDelete(item.id)}
-                      >
-                        <Text style={styles.downloadButtonText}>删除</Text>
-                      </Pressable>
-                    ) : (
-                      <Pressable
-                        style={[styles.downloadButton, isDownloading && styles.downloadingButton]}
-                        onPress={() => handleDownload(item.id)}
-                        disabled={isDownloading}
-                      >
-                        <Text style={styles.downloadButtonText}>
-                          {isDownloading ? `${(progress * 100).toFixed(0)}%` : '下载'}
-                        </Text>
-                      </Pressable>
-                    )}
-                  </View>
-                )}
-              </Pressable>
-            );
+        {/* ================================================================
+            BOTTOM OFF-ROAD DRIVING COCKPIT HUD
+           ================================================================ */}
+        <LocationHUD
+          isTracking={isTracking}
+          deviation={deviation}
+          remainingDistanceKm={remainingDistanceKm}
+          progressPercent={progressPercent}
+          totalDistanceKm={Number(route.total_distance || 0)}
+          totalAscentM={totalAscent}
+          waypointCount={routeMeta.waypoints.length}
+          satelliteLit={satelliteLit && hasLocalMBTiles}
+          hasLocalMBTiles={hasLocalMBTiles}
+          onToggleTracking={handleToggleTracking}
+          overrideCoords={simData ? simData.coords : undefined}
+          overrideHeading={simData ? simData.heading : undefined}
+          isSimulating={isSimulating}
+          simOffRoute={simOffRoute}
+          onToggleSimulating={() => {
+            setIsSimulating((prev) => !prev);
+            setSimOffRoute(false);
           }}
-          ListEmptyComponent={<Text style={styles.emptyText}>未找到路线。</Text>}
-          style={isTracking ? { display: 'none' } : {}}
+          onToggleSimOffRoute={() => setSimOffRoute((prev) => !prev)}
         />
       </View>
-
-      {/* 设置 Modal */}
-      <Modal visible={settingsVisible} animationType="slide" transparent={true}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>设置</Text>
-            <Text style={styles.inputLabel}>服务器地址</Text>
-            <TextInput
-              style={styles.input}
-              value={serverUrlInput}
-              onChangeText={setServerUrlInput}
-              autoCapitalize="none"
-              keyboardType="url"
-            />
-
-            <Text style={[styles.modalTitle, { marginTop: 10, fontSize: 16 }]}>修改密码</Text>
-            <TextInput
-              style={[styles.input, { marginBottom: 10 }]}
-              placeholder="原密码"
-              secureTextEntry
-              value={oldPassword}
-              onChangeText={setOldPassword}
-            />
-            <TextInput
-              style={[styles.input, { marginBottom: 10 }]}
-              placeholder="新密码"
-              secureTextEntry
-              value={newPassword}
-              onChangeText={setNewPassword}
-            />
-            {pwdMessage ? <Text style={styles.pwdMessage}>{pwdMessage}</Text> : null}
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={({ pressed }) => [styles.modalButton, styles.changePwdButton, pressed && { opacity: 0.7 }]}
-                onPress={handleChangePassword}
-              >
-                <Text style={styles.buttonText}>修改密码</Text>
-              </Pressable>
-            </View>
-
-            <View style={[styles.modalButtons, { marginTop: 20 }]}>
-              <Pressable
-                style={({ pressed }) => [styles.modalButton, styles.cancelButton, pressed && { opacity: 0.7 }, { flex: 1 }]}
-                onPress={() => setSettingsVisible(false)}
-              >
-                <Text style={styles.buttonText}>取消</Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.modalButton, pressed && { opacity: 0.7 }, { flex: 1 }]}
-                onPress={saveSettings}
-              >
-                <Text style={styles.buttonText}>保存设置</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -592,274 +676,220 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#080C12',
   },
   mapContainer: {
-    flex: 2,
+    flex: 1,
     position: 'relative',
   },
   map: {
     flex: 1,
   },
-  settingsButton: {
+  topHeaderBar: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 10,
-    borderRadius: 8,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 2 },
-  },
-  settingsButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  drawer: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowOffset: { width: 0, height: -2 },
-    elevation: 5,
-  },
-  drawerCollapsed: {
-    flex: 0,
-  },
-  drawerHeader: {
+    top: 12,
+    left: 12,
+    right: 12,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  drawerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  syncContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  syncStatus: {
-    marginRight: 10,
-    fontSize: 12,
-    color: '#666',
-  },
-  syncButton: {
-    backgroundColor: '#007AFF',
+    backgroundColor: 'rgba(11, 15, 23, 0.92)',
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  syncButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  routeItem: {
-    padding: 12,
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#eee',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  routeInfo: {
-    flex: 1,
-  },
-  downloadSection: {
-    marginLeft: 10,
-    justifyContent: 'center',
-  },
-  downloadButton: {
-    backgroundColor: '#34C759',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    minWidth: 80,
-    alignItems: 'center',
-  },
-  downloadingButton: {
-    backgroundColor: '#FF9500',
-  },
-  deleteButton: {
-    backgroundColor: '#FF3B30',
-  },
-  downloadButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  offlineToggle: {
-    marginTop: 8,
-    padding: 6,
-    backgroundColor: '#e6f2ff',
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-  },
-  offlineToggleText: {
-    fontSize: 12,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  trackingToggle: {
-    marginTop: 8,
-    padding: 6,
-    backgroundColor: '#34C759',
-    borderRadius: 4,
-    alignSelf: 'flex-start',
-  },
-  trackingToggleActive: {
-    backgroundColor: '#FF3B30',
-  },
-  trackingToggleText: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  trackingToggleTextActive: {
-    color: '#fff',
-  },
-  exitTrackingButton: {
-    position: 'absolute',
-    top: 50,
-    alignSelf: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
     paddingVertical: 10,
-    borderRadius: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 2 },
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#FF3B30',
+    borderColor: '#1E293B',
   },
-  exitTrackingButtonText: {
-    color: '#FF3B30',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  resumeFollowButton: {
-    position: 'absolute',
-    bottom: 80,
-    right: 10,
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 2 },
+  topBackBtn: {
+    backgroundColor: '#151E2E',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#293548',
   },
-  resumeFollowButtonText: {
-    color: '#007AFF',
-    fontWeight: 'bold',
+  topBackBtnText: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  topRouteTitleBox: {
+    flex: 1,
+    marginHorizontal: 10,
+    alignItems: 'center',
+  },
+  topRouteCodeText: {
+    color: '#F59E0B',
+    fontSize: 9,
+    fontFamily: 'monospace',
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  topRouteTitleText: {
+    color: '#F8FAFC',
     fontSize: 14,
+    fontWeight: '800',
+    marginTop: 1,
   },
-  selectedRouteItem: {
-    borderColor: '#007AFF',
-    backgroundColor: '#e6f2ff',
+  layerToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#151E2E',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#293548',
   },
-  routeName: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  layerToggleBtnActive: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+  },
+  layerToggleDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  layerToggleText: {
+    color: '#F8FAFC',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  waypointStripWrapper: {
+    position: 'absolute',
+    top: 72,
+    left: 0,
+    right: 0,
+  },
+  waypointStripScroll: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  waypointPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 36, 0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#263347',
+    marginRight: 8,
+  },
+  waypointPillActive: {
+    borderColor: '#F59E0B',
+    backgroundColor: 'rgba(245, 158, 11, 0.18)',
+  },
+  waypointPillDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#F59E0B',
+    marginRight: 6,
+  },
+  waypointPillText: {
+    color: '#CBD5E1',
+    fontSize: 11,
+    fontWeight: '600',
+    maxWidth: 130,
+  },
+  waypointPillTextActive: {
+    color: '#FDE68A',
+    fontWeight: '800',
+  },
+  waypointPopupCard: {
+    position: 'absolute',
+    top: 112,
+    left: 12,
+    right: 72,
+    backgroundColor: 'rgba(15, 23, 36, 0.95)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  waypointPopupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  routeDetails: {
+  waypointPopupTitle: {
+    color: '#F8FAFC',
     fontSize: 14,
-    color: '#555',
+    fontWeight: '800',
+    flex: 1,
   },
-  emptyText: {
-    textAlign: 'center',
-    marginTop: 20,
-    color: '#888',
+  waypointPopupClose: {
+    color: '#94A3B8',
+    fontSize: 14,
+    paddingHorizontal: 4,
   },
-  selectedRouteActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    gap: 10,
+  waypointPopupCoords: {
+    color: '#FBBF24',
+    fontSize: 11,
+    fontFamily: 'monospace',
+    marginBottom: 4,
   },
-  centerRouteButton: {
-    padding: 6,
-    backgroundColor: '#e6f2ff',
-    borderRadius: 4,
-  },
-  centerRouteButtonText: {
+  waypointPopupDesc: {
+    color: '#CBD5E1',
     fontSize: 12,
-    color: '#007AFF',
+    lineHeight: 17,
+  },
+  rightControlsPod: {
+    position: 'absolute',
+    right: 12,
+    top: '36%',
+    backgroundColor: 'rgba(11, 15, 23, 0.92)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#263347',
+    overflow: 'hidden',
+  },
+  tacticalCtrlBtn: {
+    width: 52,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tacticalCtrlBtnActive: {
+    backgroundColor: 'rgba(255, 87, 34, 0.15)',
+  },
+  ctrlDivider: {
+    height: 1,
+    backgroundColor: '#1E293B',
+  },
+  tacticalCtrlIcon: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    fontWeight: '900',
+    fontFamily: 'monospace',
+  },
+  tacticalCtrlLabel: {
+    color: '#94A3B8',
+    fontSize: 10,
+    marginTop: 2,
     fontWeight: '600',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    width: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 20,
-    fontSize: 16,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  modalButton: {
-    backgroundColor: '#007AFF',
+  resumeFollowPill: {
+    position: 'absolute',
+    bottom: 220,
+    alignSelf: 'center',
+    backgroundColor: '#2563EB',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginLeft: 10,
+    paddingVertical: 9,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#60A5FA',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
   },
-  cancelButton: {
-    backgroundColor: '#888',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  pwdMessage: {
-    color: '#ff3b30',
-    fontSize: 12,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  changePwdButton: {
-    backgroundColor: '#FF9500',
-    flex: 1,
+  resumeFollowPillText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

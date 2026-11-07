@@ -5,8 +5,27 @@ import { useLocation } from '../context/LocationContext';
 const MapLibreGL: any = (MapLibreGLNamespace as any).default ?? MapLibreGLNamespace;
 const ShapeSource = MapLibreGL.ShapeSource ?? (MapLibreGLNamespace as any).ShapeSource;
 
-export default function UserLocationLayer() {
-  const { coords, heading } = useLocation();
+interface OverrideCoords {
+  latitude: number;
+  longitude: number;
+  altitude?: number | null;
+  accuracy?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+}
+
+interface UserLocationLayerProps {
+  overrideCoords?: OverrideCoords | null;
+  overrideHeading?: number | null;
+}
+
+export default function UserLocationLayer({
+  overrideCoords,
+  overrideHeading,
+}: UserLocationLayerProps = {}) {
+  const loc = useLocation();
+  const coords = overrideCoords ?? loc.coords;
+  const heading = overrideHeading !== undefined ? overrideHeading : loc.heading;
 
   if (!coords) return null;
 

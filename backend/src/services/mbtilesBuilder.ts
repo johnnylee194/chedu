@@ -3,9 +3,7 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
-import { run } from '../database';
-// @ts-ignore
-import pLimit from 'p-limit';
+import { run, queryOne } from '../database';
 
 export interface TileEstimation {
   totalTiles: number;
@@ -81,9 +79,15 @@ function getTilesForRoute(geojson: any, zoomLevels: number[], bufferKm: number =
   return tiles;
 }
 
-export function estimateTilesForRoute(geojsonStr: string): TileEstimation {
-  const geojson = JSON.parse(geojsonStr);
-  const tiles = getTilesForRoute(geojson, [8, 9, 10, 11, 12, 13, 14, 15, 16], 1.0);
+export function estimateTilesForRoute(geojsonStr: string, maxZoom: number = 15): TileEstimation {
+  const geojson = typeof geojsonStr === 'string' ? JSON.parse(geojsonStr) : geojsonStr;
+  const targetMaxZoom = maxZoom >= 16 ? 16 : 15;
+  const zoomLevels: number[] = [];
+  for (let z = 8; z <= targetMaxZoom; z++) {
+    zoomLevels.push(z);
+  }
+
+  const tiles = getTilesForRoute(geojson, zoomLevels, 1.0);
 
   const breakdown: Record<number, number> = {};
   for (const t of tiles) {
@@ -98,15 +102,36 @@ export function estimateTilesForRoute(geojsonStr: string): TileEstimation {
   };
 }
 
+export function getTiandituTileUrl(z: number, x: number, y: number, tk: string): string {
+  const sub = (x + y + z) % 8;
+  return `https://t${sub}.tianditu.gov.cn/DataServer?T=img_w&x=${x}&y=${y}&l=${z}&tk=${tk}`;
+}
+
 const activeJobs = new Map<string, { status: string, total: number, downloaded: number, error?: string }>();
 
 export async function buildMBTiles(
   routeId: number,
   geojsonStr: string,
-  sourceUrlTemplate: string = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+  options: { tk?: string; maxZoom?: number; forceRebuild?: boolean } = {}
 ) {
-  const geojson = JSON.parse(geojsonStr);
-  const tiles = getTilesForRoute(geojson, [8, 9, 10, 11, 12, 13, 14, 15, 16], 1.0);
+  let tk = options.tk;
+  if (!tk) {
+    const row = queryOne('SELECT value FROM settings WHERE key = ?', ['tianditu_tk']);
+    tk = row?.value || process.env.TIANDITU_TK;
+  }
+
+  if (!tk || tk.trim() === '') {
+    throw new Error('未配置天地图 API Key (tianditu_tk)，请在后台设置中填入');
+  }
+
+  const maxZoom = options.maxZoom && options.maxZoom >= 16 ? 16 : 15;
+  const zoomLevels: number[] = [];
+  for (let z = 8; z <= maxZoom; z++) {
+    zoomLevels.push(z);
+  }
+
+  const geojson = typeof geojsonStr === 'string' ? JSON.parse(geojsonStr) : geojsonStr;
+  const tiles = getTilesForRoute(geojson, zoomLevels, 1.0);
 
   const mbtilesDir = path.resolve(process.env.DATABASE_PATH ? path.dirname(process.env.DATABASE_PATH) : './data', 'mbtiles');
   if (!fs.existsSync(mbtilesDir)) {
@@ -115,95 +140,175 @@ export async function buildMBTiles(
 
   const dbPath = path.join(mbtilesDir, `route_${routeId}.mbtiles`);
 
-  // Clean up existing if present
-  if (fs.existsSync(dbPath)) {
-      fs.unlinkSync(dbPath);
+  // Handle force rebuild vs resume
+  if (options.forceRebuild && fs.existsSync(dbPath)) {
+    fs.unlinkSync(dbPath);
   }
 
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
 
   db.exec(`
-    CREATE TABLE metadata (name text, value text);
-    CREATE UNIQUE INDEX name on metadata (name);
-    CREATE TABLE tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
-    CREATE UNIQUE INDEX tile_index on tiles (zoom_level, tile_column, tile_row);
+    CREATE TABLE IF NOT EXISTS metadata (name text, value text);
+    CREATE UNIQUE INDEX IF NOT EXISTS name on metadata (name);
+    CREATE TABLE IF NOT EXISTS tiles (zoom_level integer, tile_column integer, tile_row integer, tile_data blob);
+    CREATE UNIQUE INDEX IF NOT EXISTS tile_index on tiles (zoom_level, tile_column, tile_row);
   `);
 
   const bbox = turf.bbox(geojson);
   const centerLat = (bbox[1] + bbox[3]) / 2;
   const centerLon = (bbox[0] + bbox[2]) / 2;
 
-  const insertMeta = db.prepare('INSERT INTO metadata (name, value) VALUES (?, ?)');
-  insertMeta.run('name', `Route ${routeId}`);
-  insertMeta.run('type', 'baselayer');
-  insertMeta.run('version', '1');
-  insertMeta.run('description', `Offline map for Route ${routeId}`);
-  insertMeta.run('format', 'jpg');
-  insertMeta.run('bounds', bbox.join(','));
-  insertMeta.run('center', `${centerLon},${centerLat},13`);
-  insertMeta.run('minzoom', '8');
-  insertMeta.run('maxzoom', '16');
+  const upsertMeta = db.prepare('INSERT OR REPLACE INTO metadata (name, value) VALUES (?, ?)');
+  upsertMeta.run('name', `Route ${routeId}`);
+  upsertMeta.run('type', 'baselayer');
+  upsertMeta.run('version', '1');
+  upsertMeta.run('description', `Offline map for Route ${routeId}`);
+  upsertMeta.run('format', 'jpg');
+  upsertMeta.run('bounds', bbox.join(','));
+  upsertMeta.run('center', `${centerLon},${centerLat},13`);
+  upsertMeta.run('minzoom', '8');
+  upsertMeta.run('maxzoom', String(maxZoom));
+
+  // Check already existing tiles for resume support
+  const existingRows = db.prepare('SELECT zoom_level, tile_column, tile_row FROM tiles').all() as Array<{
+    zoom_level: number;
+    tile_column: number;
+    tile_row: number;
+  }>;
+  const existingSet = new Set<string>();
+  for (const r of existingRows) {
+    existingSet.add(`${r.zoom_level}/${r.tile_column}/${r.tile_row}`);
+  }
+
+  let alreadyDownloadedCount = 0;
+  const pendingTiles: TileInfo[] = [];
+
+  for (const t of tiles) {
+    const tmsY = Math.pow(2, t.z) - 1 - t.y;
+    if (existingSet.has(`${t.z}/${t.x}/${tmsY}`)) {
+      alreadyDownloadedCount++;
+    } else {
+      pendingTiles.push(t);
+    }
+  }
 
   const insertTile = db.prepare('INSERT OR IGNORE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)');
 
-  activeJobs.set(routeId.toString(), { status: 'downloading', total: tiles.length, downloaded: 0 });
+  activeJobs.set(routeId.toString(), {
+    status: 'downloading',
+    total: tiles.length,
+    downloaded: alreadyDownloadedCount
+  });
 
-  run('UPDATE routes SET tile_status = ?, total_tiles = ?, downloaded_tiles = ? WHERE id = ?', ['downloading', tiles.length, 0, routeId]);
+  run('UPDATE routes SET tile_status = ?, total_tiles = ?, downloaded_tiles = ?, max_zoom = ? WHERE id = ?', [
+    'downloading',
+    tiles.length,
+    alreadyDownloadedCount,
+    maxZoom,
+    routeId
+  ]);
 
-  const limit = pLimit(8);
+  // Rate Limiting: 4 req/s max, 2 concurrent max, ~250ms interval between launches
   let failedTilesCount = 0;
+  let downloadedCount = alreadyDownloadedCount;
 
-  const downloadTile = async (t: TileInfo) => {
-    let url = sourceUrlTemplate.replace('{z}', t.z.toString()).replace('{x}', t.x.toString()).replace('{y}', t.y.toString());
+  const downloadSingleTile = async (t: TileInfo) => {
+    const url = getTiandituTileUrl(t.z, t.x, t.y, tk as string);
+    const tmsY = Math.pow(2, t.z) - 1 - t.y;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const response = await axios.get(url, { responseType: 'arraybuffer', timeout: 5000 });
+      try {
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          timeout: 6000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://map.tianditu.gov.cn/'
+          }
+        });
 
-            // TMS conversion: tile_row = (1 << z) - 1 - y
-            const tmsY = Math.pow(2, t.z) - 1 - t.y;
+        insertTile.run(t.z, t.x, tmsY, Buffer.from(response.data));
+        downloadedCount++;
 
-            insertTile.run(t.z, t.x, tmsY, Buffer.from(response.data));
-
-            const job = activeJobs.get(routeId.toString());
-            if (job) {
-                job.downloaded += 1;
-                // Periodic DB flush every 50 tiles or so could be added here
-                if (job.downloaded % 50 === 0) {
-                     run('UPDATE routes SET downloaded_tiles = ? WHERE id = ?', [job.downloaded, routeId]);
-                }
-            }
-            return;
-        } catch (error) {
-            if (attempt === 3) {
-                console.error(`Failed to download tile ${t.z}/${t.x}/${t.y} after 3 attempts`, error);
-                failedTilesCount++;
-            } else {
-                await new Promise(r => setTimeout(r, 1000 * attempt));
-            }
+        const job = activeJobs.get(routeId.toString());
+        if (job) {
+          job.downloaded = downloadedCount;
         }
+
+        if (downloadedCount % 20 === 0 || downloadedCount === tiles.length) {
+          run('UPDATE routes SET downloaded_tiles = ? WHERE id = ?', [downloadedCount, routeId]);
+        }
+        return;
+      } catch (err) {
+        if (attempt === 3) {
+          console.error(`[Tianditu Tile] Failed tile ${t.z}/${t.x}/${t.y} after 3 attempts`, err);
+          failedTilesCount++;
+        } else {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
     }
   };
 
+  // Safe Rate Limiter execution (4 req/s)
+  const runWithRateLimit = async () => {
+    let index = 0;
+    const running = new Set<Promise<any>>();
+
+    while (index < pendingTiles.length) {
+      const tile = pendingTiles[index++];
+      const p = downloadSingleTile(tile).finally(() => running.delete(p));
+      running.add(p);
+
+      if (running.size >= 2) {
+        await Promise.race(running);
+      }
+      await new Promise(r => setTimeout(r, 260)); // ~3.8 req/sec max
+    }
+
+    await Promise.all(Array.from(running));
+  };
+
   try {
-      await Promise.all(tiles.map(t => limit(() => downloadTile(t))));
+    if (pendingTiles.length > 0) {
+      await runWithRateLimit();
+    }
 
-      const stats = fs.statSync(dbPath);
-      const mbSize = stats.size / (1024 * 1024);
+    const stats = fs.statSync(dbPath);
+    const mbSize = stats.size / (1024 * 1024);
 
-      activeJobs.set(routeId.toString(), { status: 'completed', total: tiles.length, downloaded: tiles.length });
-      run('UPDATE routes SET tile_status = ?, downloaded_tiles = ?, file_size_mb = ? WHERE id = ?', ['completed', tiles.length, mbSize, routeId]);
+    activeJobs.set(routeId.toString(), {
+      status: 'completed',
+      total: tiles.length,
+      downloaded: downloadedCount
+    });
+
+    run('UPDATE routes SET tile_status = ?, downloaded_tiles = ?, file_size_mb = ? WHERE id = ?', [
+      'completed',
+      tiles.length,
+      mbSize,
+      routeId
+    ]);
   } catch (err: any) {
-      activeJobs.set(routeId.toString(), { status: 'failed', total: tiles.length, downloaded: 0, error: err.message });
-      run('UPDATE routes SET tile_status = ?, error_message = ? WHERE id = ?', ['failed', err.message, routeId]);
+    activeJobs.set(routeId.toString(), {
+      status: 'failed',
+      total: tiles.length,
+      downloaded: downloadedCount,
+      error: err.message
+    });
+    run('UPDATE routes SET tile_status = ?, error_message = ? WHERE id = ?', [
+      'failed',
+      err.message,
+      routeId
+    ]);
   } finally {
-      console.log(`[MBTiles Build Stats] Route ${routeId} finished. Total Target: ${tiles.length}, Failed/Dropped: ${failedTilesCount}`);
-      db.close();
-      setTimeout(() => activeJobs.delete(routeId.toString()), 60000); // clear memory after 1 minute
+    console.log(`[MBTiles Build Stats] Route ${routeId} finished. Total Target: ${tiles.length}, Existing: ${alreadyDownloadedCount}, Failed: ${failedTilesCount}`);
+    db.close();
+    setTimeout(() => activeJobs.delete(routeId.toString()), 60000);
   }
 }
 
 export function getJobStatus(routeId: string) {
-    return activeJobs.get(routeId);
+  return activeJobs.get(routeId);
 }
