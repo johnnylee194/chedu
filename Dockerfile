@@ -38,6 +38,7 @@ WORKDIR /app
 # 复制生产环境依赖和产物
 COPY --from=backend-builder /app/node_modules ./node_modules
 COPY --from=backend-builder /app/dist ./dist
+COPY --from=backend-builder /app/seed_assets ./seed_assets
 COPY --from=frontend-builder /app/client/dist ./client/dist
 COPY backend/package*.json ./
 

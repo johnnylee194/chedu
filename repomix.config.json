@@ -9,7 +9,6 @@
     "backend/src/**/*",
     "frontend/src/**/*",
     "mobile/src/**/*",
-    "scripts/**/*",
     "mobile/App.tsx",
     "mobile/index.ts",
     "backend/package.json",
@@ -17,11 +16,7 @@
     "mobile/package.json",
     "backend/tsconfig.json",
     "frontend/tsconfig.json",
-    "mobile/tsconfig.json",
-    "docker-compose.yml",
-    "Dockerfile",
-    "repomix.config.json",
-    ".github/workflows/**/*"
+    "mobile/tsconfig.json"
   ],
   "ignore": {
     "customPatterns": [

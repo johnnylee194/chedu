@@ -5,7 +5,9 @@ build
 .DS_Store
 *.log
 uploads
+uploads_old
 data
+data_old
 *.db
 *.db-shm
 *.db-wal
